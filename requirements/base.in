@@ -1,5 +1,5 @@
 -c constraints.in
-unstructured[all-docs]
+unstructured[all-docs]==0.18.13
 click
 fastapi
 uvicorn
