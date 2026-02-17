@@ -19,10 +19,10 @@ RUN apk update && \
     apk add libxml2 python-3.12 python-3.12-base glib \
       mesa-gl mesa-libgallium cmake bash libmagic wget git openjpeg \
       poppler poppler-utils poppler-glib libreoffice tesseract && \
-    git clone --depth 1 https://github.com/tesseract-ocr/tessdata.git /tmp/tessdata && \
     mkdir -p /usr/local/share/tessdata && \
-    cp /tmp/tessdata/*.traineddata /usr/local/share/tessdata && \
-    rm -rf /tmp/tessdata && \
+    wget -q https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata -P /usr/local/share/tessdata && \
+    wget -q https://github.com/tesseract-ocr/tessdata/raw/main/fra.traineddata -P /usr/local/share/tessdata && \
+    wget -q https://github.com/tesseract-ocr/tessdata/raw/main/osd.traineddata -P /usr/local/share/tessdata && \
     git clone --depth 1 https://github.com/tesseract-ocr/tessconfigs /tmp/tessconfigs && \
     cp -r /tmp/tessconfigs/configs /usr/local/share/tessdata && \
     cp -r /tmp/tessconfigs/tessconfigs /usr/local/share/tessdata && \

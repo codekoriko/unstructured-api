@@ -32,6 +32,7 @@ class GeneralFormParams(BaseModel):
     combine_under_n_chars: Optional[int]
     max_characters: int
     multipage_sections: bool
+    include_orig_elements: bool
     new_after_n_chars: Optional[int]
     overlap: int
     overlap_all: bool
@@ -207,6 +208,15 @@ class GeneralFormParams(BaseModel):
                 title="Multipage Sections",
                 description="If chunking strategy is set, determines if sections can span multiple sections. Default: true",
             ),
+            BeforeValidator(SmartValueParser[bool]().value_or_first_element),
+        ] = True,
+        include_orig_elements: Annotated[
+            bool,
+            Form(
+                title="Include Orig Elements",
+                description="If chunking strategy is set, determines if original elements are included in the metadata. Default: true",
+            ),
+            BeforeValidator(SmartValueParser[bool]().value_or_first_element),
         ] = True,
         new_after_n_chars: Annotated[
             Optional[int],
@@ -280,6 +290,7 @@ level of "pollution" of otherwise clean semantic chunk boundaries. Default: Fals
             combine_under_n_chars=combine_under_n_chars,
             max_characters=max_characters,
             multipage_sections=multipage_sections,
+            include_orig_elements=include_orig_elements,
             new_after_n_chars=new_after_n_chars,
             overlap=overlap,
             overlap_all=overlap_all,
