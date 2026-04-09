@@ -1,0 +1,16 @@
+---
+description: Run markdownlint on Markdown changes
+globs: **/*.{md,mdx,mdc}
+alwaysApply: false
+---
+
+# Markdownlint on change
+
+When creating or modifying Markdown files, run markdownlint and fix any issues you introduce.
+
+Use the CLI installed globally:
+
+- Lint current file: `markdownlint "<path>"`
+- Lint a set of files: `markdownlint "**/*.{md,mdx,mdc}"`
+
+If markdownlint reports issues, address them before finishing.

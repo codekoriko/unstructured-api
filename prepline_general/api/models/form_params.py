@@ -27,6 +27,10 @@ class GeneralFormParams(BaseModel):
     strategy: str
     extract_image_block_types: Optional[List[str]]
     unique_element_ids: bool
+    # -- async options --
+    destination_url: Optional[str]
+    callback_url: Optional[str]
+    callback_headers: Optional[str]
     # -- chunking options --
     chunking_strategy: Optional[str]
     combine_under_n_chars: Optional[int]
@@ -268,6 +272,30 @@ level of "pollution" of otherwise clean semantic chunk boundaries. Default: Fals
                 examples=[False],
             ),
         ] = True,
+        destination_url: Annotated[
+            Optional[str],
+            Form(
+                title="Destination URL",
+                description="The URL where the parsed results will be stored via HTTP PUT",
+            ),
+            BeforeValidator(SmartValueParser[str]().value_or_first_element),
+        ] = None,
+        callback_url: Annotated[
+            Optional[str],
+            Form(
+                title="Callback URL",
+                description="The webhook URL to POST to when processing is finished",
+            ),
+            BeforeValidator(SmartValueParser[str]().value_or_first_element),
+        ] = None,
+        callback_headers: Annotated[
+            Optional[str],
+            Form(
+                title="Callback Headers",
+                description="A JSON string of headers to be included in the callback POST request",
+            ),
+            BeforeValidator(SmartValueParser[str]().value_or_first_element),
+        ] = None,
     ) -> "GeneralFormParams":
         return cls(
             xml_keep_tags=xml_keep_tags,
@@ -295,6 +323,9 @@ level of "pollution" of otherwise clean semantic chunk boundaries. Default: Fals
             overlap=overlap,
             overlap_all=overlap_all,
             unique_element_ids=unique_element_ids,
+            destination_url=destination_url,
+            callback_url=callback_url,
+            callback_headers=callback_headers,
             starting_page_number=starting_page_number,
             include_slide_notes=include_slide_notes,
         )

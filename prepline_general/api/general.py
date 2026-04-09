@@ -18,6 +18,7 @@ import psutil
 import requests
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     FastAPI,
     HTTPException,
@@ -25,7 +26,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pypdf import PageObject, PdfReader, PdfWriter
 from pypdf.errors import FileNotDecryptedError, PdfReadError
 from starlette.datastructures import Headers
@@ -622,6 +623,102 @@ def ungz_file(file: UploadFile, gz_uncompressed_content_type: Optional[str] = No
     )
 
 
+def process_and_callback(
+    file_content: bytes,
+    request_headers: Mapping[str, str],
+    form_params: GeneralFormParams,
+    filename: str,
+    file_content_type: Optional[str],
+    chunking_strategy: Optional[str],
+) -> None:
+    """
+    Executes the pipeline_api synchronous logic for a single file, serializes the
+    result, and performs HTTP PUT to the destination_url and HTTP POST to callback_url.
+
+    This function handles the extraction of elements in the background to avoid
+    blocking the client.
+    """
+    try:
+        logger.info("Starting async processing for file: %s", filename)
+        
+        class DummyClient:
+            host = "127.0.0.1"
+
+        class DummyRequest:
+            headers = request_headers
+            client = DummyClient()
+
+        dummy_req = DummyRequest()
+        file_io = io.BytesIO(file_content)
+
+        response = pipeline_api(
+            file_io,
+            request=dummy_req,  # type: ignore
+            coordinates=form_params.coordinates,
+            encoding=form_params.encoding,
+            hi_res_model_name=form_params.hi_res_model_name,
+            include_page_breaks=form_params.include_page_breaks,
+            ocr_languages=form_params.ocr_languages,
+            pdf_infer_table_structure=form_params.pdf_infer_table_structure,
+            skip_infer_table_types=form_params.skip_infer_table_types,
+            strategy=form_params.strategy,
+            xml_keep_tags=form_params.xml_keep_tags,
+            response_type=form_params.output_format,
+            filename=filename,
+            file_content_type=file_content_type,
+            languages=form_params.languages,
+            extract_image_block_types=form_params.extract_image_block_types,
+            unique_element_ids=form_params.unique_element_ids,
+            chunking_strategy=chunking_strategy,
+            combine_under_n_chars=form_params.combine_under_n_chars,
+            max_characters=form_params.max_characters,
+            multipage_sections=form_params.multipage_sections,
+            include_orig_elements=form_params.include_orig_elements,
+            new_after_n_chars=form_params.new_after_n_chars,
+            overlap=form_params.overlap,
+            overlap_all=form_params.overlap_all,
+            starting_page_number=form_params.starting_page_number,
+            include_slide_notes=form_params.include_slide_notes,
+        )
+
+        if form_params.output_format == "text/csv":
+            result_data = response.encode("utf-8") if isinstance(response, str) else str(response).encode("utf-8")
+            headers = {"Content-Type": "text/csv"}
+            logger.info("Extraction successful for %s. Serialized to CSV (%d bytes)", filename, len(result_data))
+        else:
+            result_data = json.dumps(response).encode("utf-8")
+            headers = {"Content-Type": "application/json"}
+            logger.info("Extraction successful for %s. Serialized to JSON (%d bytes)", filename, len(result_data))
+
+        if form_params.destination_url:
+            logger.info("Attempting to PUT extraction results to destination_url for %s", filename)
+            put_resp = requests.put(form_params.destination_url, data=result_data, headers=headers)
+            if not put_resp.ok:
+                logger.error("PUT to destination_url failed with status %d: %s", put_resp.status_code, put_resp.text)
+            put_resp.raise_for_status()
+            logger.info("Successfully uploaded extraction results to destination_url for %s", filename)
+
+        if form_params.callback_url:
+            logger.info("Attempting to POST to Kestra callback_url for %s", filename)
+            kwargs = {}
+            if form_params.callback_headers:
+                try:
+                    kwargs["headers"] = json.loads(form_params.callback_headers)
+                except Exception as e:
+                    logger.warning("Failed to parse callback_headers for %s: %s", filename, str(e))
+            
+            post_resp = requests.post(form_params.callback_url, **kwargs)
+            if not post_resp.ok:
+                logger.error("POST to callback_url failed with status %d: %s", post_resp.status_code, post_resp.text)
+            post_resp.raise_for_status()
+            logger.info("Successfully triggered Kestra callback_url for %s", filename)
+
+        logger.info("Async processing successfully completed for file: %s", filename)
+
+    except Exception as e:
+        logger.exception("Failed async processing for %s: %s", filename, str(e))
+
+
 @router.get("/general/v0/general", include_in_schema=False)
 @router.get(f"/general/{api_version}/general", include_in_schema=False)
 async def handle_invalid_get_request():
@@ -641,6 +738,7 @@ async def handle_invalid_get_request():
 @router.post(f"/general/{api_version}/general", include_in_schema=False)
 def general_partition(
     request: Request,
+    background_tasks: BackgroundTasks,
     # cannot use annotated type here because of a bug described here:
     # https://github.com/tiangolo/fastapi/discussions/10280
     # The openapi metadata must be added separately in openapi.py file.
@@ -685,6 +783,34 @@ def general_partition(
         is_extension_gz = file.filename and file.filename.endswith(".gz")
         if is_content_type_gz or is_extension_gz:
             files[idx] = ungz_file(file, form_params.gz_uncompressed_content_type)
+
+    if form_params.destination_url:
+        if len(files) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Async processing (destination_url) is currently only supported for single file uploads."
+            )
+        file = files[0]
+        file_content_type = get_validated_mimetype(
+            file, content_type_hint=form_params.content_type
+        )
+        file_content = file.file.read()
+        filename = str(file.filename)
+        request_headers = dict(request.headers)
+
+        background_tasks.add_task(
+            process_and_callback,
+            file_content=file_content,
+            request_headers=request_headers,
+            form_params=form_params,
+            filename=filename,
+            file_content_type=file_content_type,
+            chunking_strategy=chunking_strategy,
+        )
+        return JSONResponse(
+            content={"detail": "Accepted for processing"},
+            status_code=status.HTTP_202_ACCEPTED
+        )
 
     def response_generator(is_multipart: bool):
         for file in files:

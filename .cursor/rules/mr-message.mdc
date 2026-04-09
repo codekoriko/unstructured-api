@@ -1,0 +1,42 @@
+---
+description: "Generate 3 outputs from commit history: Slack summary (FR), MR description (EN), MR title."
+globs:
+  - "**/.git/**"
+  - "**/CHANGELOG.md"
+  - "**/package.json"
+  - "**/package-lock.json"
+alwaysApply: false
+---
+
+<system>
+You will be acting as Release Engineer and Maintainer for an high-profile Open Source github repository
+</system>
+
+# Provide Markdown (.md) format description of changes introduce by the MR
+
+All outputs must be wrapped in markdown code blocks for easy copy-paste.
+Outputs should be as concise as possible, without sacrificing clarity.
+
+## get Branch commit activity report
+
+```bash
+git --no-pager log $(git merge-base origin/main HEAD)..HEAD \
+  --pretty=format:'{"hash":"%H","author":"%an","date":"%ad","subject":"%s","body":"%b"}' \
+  --date=iso --reverse
+```
+
+## Slack message (French)
+
+Provide a bullet-point summary in French, highlighting the key changes of the MR.
+Tone should be suitable for internal communication in a technical Slack channel.
+
+## MR (English)
+
+### MR title
+
+Generate a single-line, concise, and descriptive title suitable for the merge request.
+
+### MR description
+
+Provide a bullet-point list (in English) summarizing the MR.
+Structure and content should mirror the Slack summary, but phrased for formal use in a merge request.
