@@ -13,6 +13,7 @@ dependencies = [
     "psutil >=7.0.0, <8.0.0",
     "pypdf >=6.0.0, <7.0.0",
     "requests >=2.32.0, <3.0.0",
+    "pyinstrument >=5.0.0, <6.0.0",
 ]
 
 [dependency-groups]

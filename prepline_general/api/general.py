@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 import io
 import json
@@ -46,6 +47,13 @@ from prepline_general.api import __version__ as api_version
 
 app = FastAPI()
 router = APIRouter()
+
+# Executor for processing background tasks sequentially to avoid CPU thrashing
+single_worker_executor = ThreadPoolExecutor(max_workers=1)
+
+@router.on_event("shutdown")
+def shutdown_executor():
+    single_worker_executor.shutdown(wait=True)
 
 
 def is_compatible_response_type(media_type: str, response_type: type) -> bool:
@@ -640,7 +648,7 @@ def process_and_callback(
     """
     try:
         logger.info("Starting async processing for file: %s", filename)
-        
+
         class DummyClient:
             host = "127.0.0.1"
 
@@ -706,7 +714,7 @@ def process_and_callback(
                     kwargs["headers"] = json.loads(form_params.callback_headers)
                 except Exception as e:
                     logger.warning("Failed to parse callback_headers for %s: %s", filename, str(e))
-            
+
             post_resp = requests.post(form_params.callback_url, **kwargs)
             if not post_resp.ok:
                 logger.error("POST to callback_url failed with status %d: %s", post_resp.status_code, post_resp.text)
@@ -798,7 +806,9 @@ def general_partition(
         filename = str(file.filename)
         request_headers = dict(request.headers)
 
-        background_tasks.add_task(
+        # Since general_partition is a def (sync) function, we cannot use get_running_loop directly.
+        # We need to get the event loop from the current thread if available, or just submit to the executor.
+        single_worker_executor.submit(
             process_and_callback,
             file_content=file_content,
             request_headers=request_headers,
