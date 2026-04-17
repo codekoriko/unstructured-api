@@ -26,7 +26,7 @@ This file records **semantic changes** in this fork compared to **upstream** (`u
 ### 2026-04-09 — Asynchronous webhook callbacks for extraction
 
 - **Area:** API
-- **Summary:** Added `destination_url` and `callback_url` parameters to the partitioning flow to run the unstructured extraction asynchronously in the background using FastAPI `BackgroundTasks`. The API now returns `202 Accepted` immediately, and upon completion, performs an HTTP PUT to upload the parsed JSON and an HTTP POST to trigger the webhook callback.
+- **Summary:** Added `destination_url` and `callback_url` parameters to the partitioning flow to run the unstructured extraction asynchronously in the background using `ThreadPoolExecutor(max_workers=1)`. The API now returns `202 Accepted` immediately, and upon completion, performs an HTTP PUT to upload the parsed JSON and an HTTP POST to trigger the webhook callback.
 - **Related:** Edge / infra repo `~/dev/js/contradic_mvp_backend_infra_stack`: `ingest-unstructured` edge function was refactored to use these parameters (passing a signed storage PUT URL and a Kestra resume webhook). It no longer blocks and waits for processing; Kestra pauses and waits for the callback to resume to a new `ingest-unstructured-finalize` step.
 
 ### 2026-02-17 — Partitioning API option and faster OCR image builds
