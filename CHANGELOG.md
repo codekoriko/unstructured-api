@@ -1,3 +1,37 @@
+## 0.1.7
+
+### Security
+
+- **Bump starlette** to >=1.1.0 to remediate CVE-2025-62727 (HIGH) and CVE-2025-54121 (MEDIUM).
+- **Bump lxml** to >=6.1.1 to remediate CVE-2026-41066 (HIGH).
+- **Bump python-multipart** to >=0.0.29 to remediate CVE-2026-40347 (MEDIUM).
+- **Rebuild** to pick up latest python-3.12 apk, resolving CVE-2025-12781 (MEDIUM).
+
+## 0.1.6
+
+### Security
+
+- **Bump starlette** to latest to remediate CVE-2025-54121 (MEDIUM) and CVE-2025-62727 (HIGH). Removes the `starlette==0.41.2` constraint pin.
+- **Bump python-multipart** to latest to remediate CVE-2026-40347 (MEDIUM).
+
+## 0.1.5
+
+### Security
+
+- **Purge uv wheel cache after opencv swap**: The 0.1.4 Dockerfile uninstalled the PyPI `opencv-python` wheel and installed the ffmpeg-free replacement, but the original wheel's extracted contents (including `libavcodec.so.59.*` and friends) remained in `~/.cache/uv/archive-v0/…/opencv_python.libs/`. Image scanners still flagged the 14 ffmpeg CVEs because they walk the whole filesystem. Added `uv cache clean` at the end of the opencv replacement `RUN` so the vulnerable libs are evicted from the final image layer.
+
+## 0.1.4
+
+### Security
+
+- **Replace PyPI opencv wheels with ffmpeg-free builds in Docker image**: After `uv sync`, the Dockerfile now substitutes the installed PyPI opencv-python variant with a source-built `opencv-contrib-python-headless` wheel compiled with `WITH_FFMPEG=OFF`, eliminating 14 bundled ffmpeg CVEs. The contrib-headless variant is a strict superset of the cv2 API (core + contrib modules, no GUI) and can transparently replace `opencv-python`, `opencv-python-headless`, or `opencv-contrib-python`. Wheel is downloaded from the upstream `Unstructured-IO/unstructured` release and hash-verified. Mirrors [unstructured#4336](https://github.com/Unstructured-IO/unstructured/pull/4336).
+
+## 0.1.3
+
+### Security
+
+- **security:** fix(deps): upgrade vulnerable transitive dependencies [security]
+
 ## 0.1.2
 * Bump all packages (refresh uv.lock), pulling `unstructured==0.22.12` which replaces NLTK with spaCy
 * Replace `download_nltk_packages` calls with spaCy model pre-download in Makefile, Dockerfile, and CI
