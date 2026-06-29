@@ -23,6 +23,12 @@ This file records **semantic changes** in this fork compared to **upstream** (`u
 
 ## Entries
 
+### 2026-06-29 — Sync upstream to 0.1.7
+
+- **Area:** Dependencies, Docker, API
+- **Summary:** Merged `upstream/main` after release `0.1.2`, bringing versions `0.1.3`–`0.1.7` (transitive dependency CVE fixes, ffmpeg-free opencv Docker build, starlette/lxml/python-multipart bumps). Fork features retained: async `destination_url`/`callback_url`/`callback_headers`, `source_url`, `include_orig_elements`, selective tessdata Dockerfile, GitLab CI publish.
+- **Commit(s):** merge `6604b55`
+
 ### 2026-06-29 — GitLab CI Docker publish to private registry
 
 - **Area:** CI
