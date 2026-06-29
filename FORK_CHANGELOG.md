@@ -23,6 +23,12 @@ This file records **semantic changes** in this fork compared to **upstream** (`u
 
 ## Entries
 
+### 2026-06-29 — Signed source_url for async partition input
+
+- **Area:** API
+- **Summary:** Added `source_url` and `source_filename` form parameters for async requests (`destination_url` set). The worker fetches the input file over HTTPS from an allowlisted host instead of requiring a multipart upload, with SSRF protections (host suffix allowlist, DNS/IP checks, redirect blocking, size limits). Mutually exclusive with file upload.
+- **Related:** Edge / infra repo `backend-infra-stack`: `ingest-unstructured` now creates a short-lived signed download URL via `createSignedUrl` and passes it as `source_url`, avoiding edge-function memory limits on large files. Configure `SOURCE_URL_ALLOWED_HOST_SUFFIXES` / `SOURCE_URL_ALLOWED_HOSTS` on the API deployment.
+
 ### 2026-04-09 — Asynchronous webhook callbacks for extraction
 
 - **Area:** API

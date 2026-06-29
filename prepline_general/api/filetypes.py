@@ -17,6 +17,30 @@ def _remove_optional_info_from_mime_type(content_type: str | None) -> str | None
     return content_type.split(";")[0]
 
 
+def get_validated_mimetype_from_bytes(
+    file_content: bytes,
+    filename: str,
+    content_type_hint: str | None = None,
+) -> Optional[str]:
+    """Validate partition support for in-memory file bytes (e.g. source_url downloads)."""
+    content_type: str | None = content_type_hint
+
+    filetype = FileType.from_mime_type(content_type) if content_type else None
+
+    if not filetype or filetype == FileType.UNK:
+        file_buffer = BytesIO(file_content)
+        file_buffer.name = filename
+        filetype = detect_filetype(file=file_buffer)
+
+    if not filetype.is_partitionable:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"File type {filetype.mime_type} is not supported."),
+        )
+
+    return filetype.mime_type
+
+
 def get_validated_mimetype(file: UploadFile, content_type_hint: str | None = None) -> Optional[str]:
     """Given the incoming file, identify and return the correct mimetype.
 

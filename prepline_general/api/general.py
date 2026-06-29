@@ -22,6 +22,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     FastAPI,
+    File,
     HTTPException,
     Request,
     UploadFile,
@@ -33,8 +34,17 @@ from pypdf.errors import FileNotDecryptedError, PdfReadError
 from starlette.datastructures import Headers
 from starlette.types import Send
 
-from prepline_general.api.filetypes import get_validated_mimetype
+from prepline_general.api.filetypes import (
+    get_validated_mimetype,
+    get_validated_mimetype_from_bytes,
+)
 from prepline_general.api.models.form_params import GeneralFormParams
+from prepline_general.api.source_url import (
+    SourceUrlValidationError,
+    fetch_source_file,
+    validate_source_filename,
+    validate_source_url,
+)
 from unstructured.documents.elements import Element
 from unstructured.partition.auto import partition
 from unstructured.staging.base import (
@@ -632,7 +642,7 @@ def ungz_file(file: UploadFile, gz_uncompressed_content_type: Optional[str] = No
 
 
 def process_and_callback(
-    file_content: bytes,
+    file_content: Optional[bytes],
     request_headers: Mapping[str, str],
     form_params: GeneralFormParams,
     filename: str,
@@ -648,6 +658,19 @@ def process_and_callback(
     """
     try:
         logger.info("Starting async processing for file: %s", filename)
+
+        if file_content is None:
+            if not form_params.source_url:
+                raise ValueError("No input file content or source_url provided")
+            file_content, fetched_content_type = fetch_source_file(form_params.source_url)
+            if not file_content_type and fetched_content_type:
+                file_content_type = fetched_content_type
+
+        file_content_type = get_validated_mimetype_from_bytes(
+            file_content,
+            filename,
+            file_content_type,
+        )
 
         class DummyClient:
             host = "127.0.0.1"
@@ -752,7 +775,7 @@ def general_partition(
     # The openapi metadata must be added separately in openapi.py file.
     # TODO: Check if the bug is fixed and change the declaration to use Annotated[List[UploadFile], File(...)]
     # For new parameters - add them in models/form_params.py
-    files: List[UploadFile],
+    files: List[UploadFile] = File(default=[]),
     form_params: GeneralFormParams = Depends(GeneralFormParams.as_form),
 ):
     # -- must have a valid API key --
@@ -793,21 +816,46 @@ def general_partition(
             files[idx] = ungz_file(file, form_params.gz_uncompressed_content_type)
 
     if form_params.destination_url:
-        if len(files) > 1:
+        request_headers = dict(request.headers)
+        file_content: Optional[bytes]
+        filename: str
+        file_content_type: Optional[str]
+
+        if form_params.source_url:
+            uploaded_files = [file for file in files if file.filename]
+            if uploaded_files:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Provide either source_url or files, not both.",
+                )
+            try:
+                validate_source_url(form_params.source_url)
+                filename = validate_source_filename(form_params.source_filename)
+            except SourceUrlValidationError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            file_content = None
+            file_content_type = form_params.content_type
+        elif len(files) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Async processing requires either source_url or a single file upload.",
+            )
+        elif len(files) > 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Async processing (destination_url) is currently only supported for single file uploads."
             )
-        file = files[0]
-        file_content_type = get_validated_mimetype(
-            file, content_type_hint=form_params.content_type
-        )
-        file_content = file.file.read()
-        filename = str(file.filename)
-        request_headers = dict(request.headers)
+        else:
+            file = files[0]
+            file_content_type = get_validated_mimetype(
+                file, content_type_hint=form_params.content_type
+            )
+            file_content = file.file.read()
+            filename = str(file.filename)
 
-        # Since general_partition is a def (sync) function, we cannot use get_running_loop directly.
-        # We need to get the event loop from the current thread if available, or just submit to the executor.
         single_worker_executor.submit(
             process_and_callback,
             file_content=file_content,
@@ -820,6 +868,12 @@ def general_partition(
         return JSONResponse(
             content={"detail": "Accepted for processing"},
             status_code=status.HTTP_202_ACCEPTED
+        )
+
+    if len(files) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one file upload is required.",
         )
 
     def response_generator(is_multipart: bool):
