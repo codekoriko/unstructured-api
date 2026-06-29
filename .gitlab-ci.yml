@@ -1,0 +1,65 @@
+# Publishes the Unstructured API Docker image to this private project's GitLab Container Registry
+# on every push to main (i.e. after a merge).
+#
+# Registry image: registry.gitlab.com/contradic/contradic-unstructured-api
+#
+# Push auth (private project):
+# - Default: GitLab-injected CI_REGISTRY_USER + CI_REGISTRY_PASSWORD (CI_JOB_TOKEN).
+#   Ensure Settings → CI/CD → Job token permissions allow this project to write
+#   its own container registry.
+# - Optional fallback: set masked CI/CD variables REGISTRY_DEPLOY_USER and
+#   REGISTRY_DEPLOY_TOKEN (deploy token with write_registry) if job-token access
+#   is restricted in your group.
+
+stages:
+  - publish
+
+variables:
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_DRIVER: overlay2
+  PIPELINE_PACKAGE: "general"
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+
+docker-publish:
+  stage: publish
+  image: docker:27.4-cli
+  services:
+    - name: docker:27.4-dind
+      alias: docker
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    - docker info
+    - |
+      if [ -n "${REGISTRY_DEPLOY_USER:-}" ] && [ -n "${REGISTRY_DEPLOY_TOKEN:-}" ]; then
+        echo "Logging in to ${CI_REGISTRY} with deploy token"
+        echo "$REGISTRY_DEPLOY_TOKEN" | docker login -u "$REGISTRY_DEPLOY_USER" --password-stdin "$CI_REGISTRY"
+      else
+        echo "Logging in to ${CI_REGISTRY} with CI job token"
+        echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+      fi
+  script:
+    - |
+      echo "Disk usage before cleanup:"
+      df -h
+      docker system prune -af --volumes || true
+      echo "Disk usage after cleanup:"
+      df -h
+    - export VERSION="$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' prepline_general/api/__version__.py)"
+    - |
+      if [ -z "$VERSION" ]; then
+        echo "Could not read __version__ from prepline_general/api/__version__.py"
+        exit 1
+      fi
+    - echo "Building ${IMAGE_NAME} (version=${VERSION}, sha=${CI_COMMIT_SHORT_SHA})"
+    - |
+      DOCKER_BUILDKIT=1 docker build \
+        --build-arg PIPELINE_PACKAGE="${PIPELINE_PACKAGE}" \
+        --progress=plain \
+        -t "${IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}" \
+        -t "${IMAGE_NAME}:latest" \
+        -t "${IMAGE_NAME}:${VERSION}" \
+        .
+    - docker push "${IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${IMAGE_NAME}:latest"
+    - docker push "${IMAGE_NAME}:${VERSION}"

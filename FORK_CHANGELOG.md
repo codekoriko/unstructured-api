@@ -23,6 +23,12 @@ This file records **semantic changes** in this fork compared to **upstream** (`u
 
 ## Entries
 
+### 2026-06-29 — GitLab CI Docker publish to private registry
+
+- **Area:** CI
+- **Summary:** Added `.gitlab-ci.yml` job that builds the API image on `main` and pushes to the private registry `registry.gitlab.com/contradic/contradic-unstructured-api` with `latest`, commit SHA, and `__version__` tags. CI uses `CI_JOB_TOKEN` by default; optional `REGISTRY_DEPLOY_*` variables support restricted groups. Pull requires `docker login` on deployment hosts.
+- **Related:** Deployments should pull `registry.gitlab.com/contradic/contradic-unstructured-api:latest` (or a pinned SHA/version tag) instead of public Docker Hub images where applicable.
+
 ### 2026-06-29 — Signed source_url for async partition input
 
 - **Area:** API

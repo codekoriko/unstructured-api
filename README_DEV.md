@@ -1,10 +1,50 @@
 # Development Documentation
 
-This document explains the process for building, tagging, and pushing Docker images for this repository to Docker Hub.
+This document explains the process for building, tagging, and pushing Docker images for this repository.
 
-## Pushing to Docker Hub
+## GitLab CI (recommended for production)
 
-To push a new version of the API, follow these steps:
+The GitLab project and its container registry are **private**. CI publishes on every push to `main`:
+
+`registry.gitlab.com/contradic/contradic-unstructured-api`
+
+Tags published:
+
+- `latest`
+- `<git short sha>` (e.g. `8d833a4`)
+- `<__version__>` from `prepline_general/api/__version__.py` (e.g. `0.1.2`)
+
+### CI push (automatic)
+
+The pipeline authenticates with GitLab's built-in `CI_JOB_TOKEN` (`CI_REGISTRY_USER` / `CI_REGISTRY_PASSWORD`) to push to this project's registry.
+
+If your group restricts job-token registry access, create a **deploy token** with `write_registry`, then add masked CI/CD variables:
+
+- `REGISTRY_DEPLOY_USER`
+- `REGISTRY_DEPLOY_TOKEN`
+
+Also verify **Settings → CI/CD → Job token permissions** allows this project to access its container registry.
+
+Other prerequisites:
+
+1. **Container Registry** enabled on the project.
+2. A GitLab runner with Docker-in-Docker and enough disk for image builds.
+
+### Pull on servers (manual auth required)
+
+Images are not public. Log in before `docker pull` or `docker compose pull`:
+
+```bash
+# Deploy token (read_registry) or personal/group access token with read_registry
+docker login registry.gitlab.com -u <gitlab-username-or-deploy-token-name> -p <token>
+docker pull registry.gitlab.com/contradic/contradic-unstructured-api:latest
+```
+
+On deployment hosts, store credentials in `~/.docker/config.json` or your orchestrator's secret store (Elestio, Infisical, etc.).
+
+## Manual push to Docker Hub (legacy)
+
+To push a new version of the API manually to Docker Hub, follow these steps:
 
 **prerequisite:** Launch Docker 🐋
 
