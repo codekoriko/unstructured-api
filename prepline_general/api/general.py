@@ -42,6 +42,7 @@ from prepline_general.api.models.form_params import GeneralFormParams
 from prepline_general.api.source_url import (
     SourceUrlValidationError,
     fetch_source_file,
+    outbound_request,
     validate_callback_url,
     validate_destination_url,
     validate_source_filename,
@@ -643,6 +644,34 @@ def ungz_file(file: UploadFile, gz_uncompressed_content_type: Optional[str] = No
     )
 
 
+def _send_callback(form_params: GeneralFormParams, filename: str) -> None:
+    if not form_params.callback_url:
+        return
+
+    logger.info("Attempting to POST to Kestra callback_url for %s", filename)
+    kwargs: dict[str, Any] = {}
+    if form_params.callback_headers:
+        try:
+            kwargs["headers"] = json.loads(form_params.callback_headers)
+        except Exception as e:
+            logger.warning("Failed to parse callback_headers for %s: %s", filename, str(e))
+
+    post_resp = outbound_request(
+        "POST",
+        form_params.callback_url,
+        url_label="callback_url",
+        **kwargs,
+    )
+    if not post_resp.ok:
+        logger.error(
+            "POST to callback_url failed with status %d: %s",
+            post_resp.status_code,
+            post_resp.text,
+        )
+    post_resp.raise_for_status()
+    logger.info("Successfully triggered Kestra callback_url for %s", filename)
+
+
 def process_and_callback(
     file_content: Optional[bytes],
     request_headers: Mapping[str, str],
@@ -658,6 +687,7 @@ def process_and_callback(
     This function handles the extraction of elements in the background to avoid
     blocking the client.
     """
+    callback_sent = False
     try:
         logger.info("Starting async processing for file: %s", filename)
 
@@ -724,34 +754,36 @@ def process_and_callback(
             logger.info("Extraction successful for %s. Serialized to JSON (%d bytes)", filename, len(result_data))
 
         if form_params.destination_url:
-            destination_url = validate_destination_url(form_params.destination_url)
             logger.info("Attempting to PUT extraction results to destination_url for %s", filename)
-            put_resp = requests.put(destination_url, data=result_data, headers=headers)
+            put_resp = outbound_request(
+                "PUT",
+                form_params.destination_url,
+                url_label="destination_url",
+                data=result_data,
+                headers=headers,
+            )
             if not put_resp.ok:
                 logger.error("PUT to destination_url failed with status %d: %s", put_resp.status_code, put_resp.text)
             put_resp.raise_for_status()
             logger.info("Successfully uploaded extraction results to destination_url for %s", filename)
 
         if form_params.callback_url:
-            callback_url = validate_callback_url(form_params.callback_url)
-            logger.info("Attempting to POST to Kestra callback_url for %s", filename)
-            kwargs = {}
-            if form_params.callback_headers:
-                try:
-                    kwargs["headers"] = json.loads(form_params.callback_headers)
-                except Exception as e:
-                    logger.warning("Failed to parse callback_headers for %s: %s", filename, str(e))
-
-            post_resp = requests.post(callback_url, **kwargs)
-            if not post_resp.ok:
-                logger.error("POST to callback_url failed with status %d: %s", post_resp.status_code, post_resp.text)
-            post_resp.raise_for_status()
-            logger.info("Successfully triggered Kestra callback_url for %s", filename)
+            _send_callback(form_params, filename)
+            callback_sent = True
 
         logger.info("Async processing successfully completed for file: %s", filename)
 
     except Exception as e:
         logger.exception("Failed async processing for %s: %s", filename, str(e))
+    finally:
+        if form_params.callback_url and not callback_sent:
+            try:
+                _send_callback(form_params, filename)
+            except Exception:
+                logger.exception(
+                    "Failed to POST callback_url after async processing error for %s",
+                    filename,
+                )
 
 
 @router.get("/general/v0/general", include_in_schema=False)

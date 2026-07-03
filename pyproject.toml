@@ -4,12 +4,12 @@ dynamic = ["version"]
 description = "Unstructured API for document processing"
 requires-python = ">=3.12"
 dependencies = [
-    "unstructured[all-docs] >=0.18.31, <1.0.0",
+    "unstructured[all-docs] >=0.23.1, <1.0.0",
     "fastapi >=0.128.4, <1.0.0",
     "python-multipart >=0.0.29",
     "uvicorn >=0.40.0, <1.0.0",
     "backoff >=2.2.1, <3.0.0",
-    "pandas >=3.0.0, <4.0.0",
+    "pandas >=2.2.0, <3.0.0",
     "psutil >=7.0.0, <8.0.0",
     "pypdf >=6.0.0, <7.0.0",
     "requests >=2.32.0, <3.0.0",
@@ -40,6 +40,10 @@ build-backend = "hatchling.build"
 path = "prepline_general/api/__version__.py"
 
 [tool.uv]
+# Production images are Linux-only; lock resolves for deploy targets (torch wheels).
+environments = [
+    "sys_platform == 'linux'",
+]
 # Constraints for transitive dependencies that need pinning for functional reasons
 constraint-dependencies = [
     # pdfminer.six 20260107 includes performance fix

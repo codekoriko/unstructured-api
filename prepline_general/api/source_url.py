@@ -5,10 +5,11 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 import requests
+import urllib3
 
 BLOCKED_HOSTNAMES = frozenset(
     {
@@ -17,18 +18,26 @@ BLOCKED_HOSTNAMES = frozenset(
     }
 )
 
-DEFAULT_SOURCE_HOST_SUFFIXES = ".supabase.co"
-DEFAULT_DESTINATION_HOST_SUFFIXES = ".supabase.co"
+DEFAULT_OUTBOUND_HOST_SUFFIXES = ".supabase.co"
 DEFAULT_MAX_BYTES = 500 * 1024 * 1024
 DEFAULT_FETCH_TIMEOUT_SECONDS = 300
+DEFAULT_OUTBOUND_TIMEOUT_SECONDS = 300
 
-SOURCE_ALLOWED_SUFFIXES_ENV = "SOURCE_URL_ALLOWED_HOST_SUFFIXES"
-SOURCE_ALLOWED_HOSTS_ENV = "SOURCE_URL_ALLOWED_HOSTS"
-DESTINATION_ALLOWED_SUFFIXES_ENV = "DESTINATION_URL_ALLOWED_HOST_SUFFIXES"
-DESTINATION_ALLOWED_HOSTS_ENV = "DESTINATION_URL_ALLOWED_HOSTS"
-CALLBACK_ALLOWED_SUFFIXES_ENV = "CALLBACK_URL_ALLOWED_HOST_SUFFIXES"
-CALLBACK_ALLOWED_HOSTS_ENV = "CALLBACK_URL_ALLOWED_HOSTS"
+OUTBOUND_ALLOWED_SUFFIXES_ENV = "OUTBOUND_URL_ALLOWED_HOST_SUFFIXES"
+OUTBOUND_ALLOWED_HOSTS_ENV = "OUTBOUND_URL_ALLOWED_HOSTS"
 OUTBOUND_ALLOW_HTTP_ENV = "OUTBOUND_URL_ALLOW_HTTP"
+
+# Deprecated per-role variables (still read as fallbacks when unified vars are unset).
+_LEGACY_SUFFIX_ENVS = (
+    "SOURCE_URL_ALLOWED_HOST_SUFFIXES",
+    "DESTINATION_URL_ALLOWED_HOST_SUFFIXES",
+    "CALLBACK_URL_ALLOWED_HOST_SUFFIXES",
+)
+_LEGACY_HOST_ENVS = (
+    "SOURCE_URL_ALLOWED_HOSTS",
+    "DESTINATION_URL_ALLOWED_HOSTS",
+    "CALLBACK_URL_ALLOWED_HOSTS",
+)
 
 
 class SourceUrlValidationError(ValueError):
@@ -59,6 +68,26 @@ def _max_bytes() -> int:
 
 def _fetch_timeout_seconds() -> int:
     return int(os.environ.get("SOURCE_URL_FETCH_TIMEOUT_SECONDS", str(DEFAULT_FETCH_TIMEOUT_SECONDS)))
+
+
+def _outbound_timeout_seconds() -> int:
+    return int(os.environ.get("OUTBOUND_URL_TIMEOUT_SECONDS", str(DEFAULT_OUTBOUND_TIMEOUT_SECONDS)))
+
+
+def _allowed_hosts() -> frozenset[str]:
+    hosts = _parse_csv_env(OUTBOUND_ALLOWED_HOSTS_ENV)
+    for legacy_env in _LEGACY_HOST_ENVS:
+        hosts |= _parse_csv_env(legacy_env)
+    return hosts
+
+
+def _allowed_suffixes() -> frozenset[str]:
+    suffixes = _parse_csv_env(OUTBOUND_ALLOWED_SUFFIXES_ENV)
+    for legacy_env in _LEGACY_SUFFIX_ENVS:
+        suffixes |= _parse_csv_env(legacy_env)
+    if suffixes:
+        return suffixes
+    return _parse_suffix_env(OUTBOUND_ALLOWED_SUFFIXES_ENV, DEFAULT_OUTBOUND_HOST_SUFFIXES)
 
 
 def _strip_mime_parameters(content_type: str | None) -> str | None:
@@ -103,9 +132,9 @@ def _hostname_is_allowed(
     return any(_hostname_matches_suffix(host, suffix) for suffix in allowed_suffixes)
 
 
-def _check_resolved_ips(hostname: str) -> None:
+def _first_allowed_ip(hostname: str) -> str:
     try:
-        addrinfo = socket.getaddrinfo(hostname, None)
+        addrinfo = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         raise SourceUrlValidationError(f"Cannot resolve URL host: {hostname}") from exc
 
@@ -117,6 +146,13 @@ def _check_resolved_ips(hostname: str) -> None:
             continue
         if _ip_is_blocked(ip):
             raise SourceUrlValidationError(f"URL resolves to blocked address: {ip_str}")
+        return ip_str
+
+    raise SourceUrlValidationError(f"Cannot resolve URL host: {hostname}")
+
+
+def _check_resolved_ips(hostname: str) -> None:
+    _first_allowed_ip(hostname)
 
 
 def _validate_outbound_url(
@@ -177,43 +213,29 @@ def _validate_outbound_url(
     return cleaned
 
 
-def validate_source_url(url: str) -> str:
-    """Validate a signed download URL before the worker fetches the input file."""
+def _validate_role_url(url: str, *, url_label: str) -> str:
     return _validate_outbound_url(
         url,
-        url_label="source_url",
-        allowed_hosts=_parse_csv_env(SOURCE_ALLOWED_HOSTS_ENV),
-        allowed_suffixes=_parse_suffix_env(
-            SOURCE_ALLOWED_SUFFIXES_ENV,
-            DEFAULT_SOURCE_HOST_SUFFIXES,
-        ),
+        url_label=url_label,
+        allowed_hosts=_allowed_hosts(),
+        allowed_suffixes=_allowed_suffixes(),
         resolve_dns=True,
     )
+
+
+def validate_source_url(url: str) -> str:
+    """Validate a signed download URL before the worker fetches the input file."""
+    return _validate_role_url(url, url_label="source_url")
 
 
 def validate_destination_url(url: str) -> str:
     """Validate the signed upload URL where extraction JSON is written."""
-    return _validate_outbound_url(
-        url,
-        url_label="destination_url",
-        allowed_hosts=_parse_csv_env(DESTINATION_ALLOWED_HOSTS_ENV),
-        allowed_suffixes=_parse_suffix_env(
-            DESTINATION_ALLOWED_SUFFIXES_ENV,
-            DEFAULT_DESTINATION_HOST_SUFFIXES,
-        ),
-        resolve_dns=True,
-    )
+    return _validate_role_url(url, url_label="destination_url")
 
 
 def validate_callback_url(url: str) -> str:
     """Validate the orchestrator webhook URL resumed after async extraction."""
-    return _validate_outbound_url(
-        url,
-        url_label="callback_url",
-        allowed_hosts=_parse_csv_env(CALLBACK_ALLOWED_HOSTS_ENV),
-        allowed_suffixes=_parse_suffix_env(CALLBACK_ALLOWED_SUFFIXES_ENV, ""),
-        resolve_dns=True,
-    )
+    return _validate_role_url(url, url_label="callback_url")
 
 
 def validate_source_filename(filename: str | None) -> str:
@@ -232,33 +254,85 @@ def validate_source_filename(filename: str | None) -> str:
     return basename
 
 
+def _request_path_and_query(parsed) -> str:
+    path = parsed.path or "/"
+    if parsed.query:
+        return f"{path}?{parsed.query}"
+    return path
+
+
+def _pinned_pool(parsed, pinned_ip: str, timeout_seconds: int):
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
+    if parsed.scheme == "https":
+        return urllib3.HTTPSConnectionPool(
+            pinned_ip,
+            port=port,
+            server_hostname=parsed.hostname,
+            timeout=timeout,
+        )
+    return urllib3.HTTPConnectionPool(pinned_ip, port=port, timeout=timeout)
+
+
+def outbound_request(
+    method: str,
+    url: str,
+    *,
+    url_label: str,
+    timeout_seconds: int | None = None,
+    **kwargs: Any,
+) -> requests.Response:
+    """Issue an allowlisted outbound HTTP request without following redirects."""
+    validated_url = _validate_role_url(url, url_label=url_label)
+    timeout = timeout_seconds if timeout_seconds is not None else _outbound_timeout_seconds()
+    return requests.request(
+        method,
+        validated_url,
+        timeout=timeout,
+        allow_redirects=False,
+        **kwargs,
+    )
+
+
 def fetch_source_file(url: str) -> tuple[bytes, Optional[str]]:
-    """Download a validated source file with size limits and redirect blocking."""
+    """Download a validated source file with DNS pinning, size limits, and no redirects."""
     validated_url = validate_source_url(url)
     max_bytes = _max_bytes()
     timeout = _fetch_timeout_seconds()
+    parsed = urlparse(validated_url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise SourceUrlValidationError("source_url is missing a host")
 
-    response = requests.get(
-        validated_url,
-        stream=True,
-        timeout=timeout,
-        allow_redirects=False,
+    pinned_ip = _first_allowed_ip(hostname)
+    pool = _pinned_pool(parsed, pinned_ip, timeout)
+    http_response = pool.request(
+        "GET",
+        _request_path_and_query(parsed),
+        headers={"Host": hostname},
+        preload_content=False,
+        redirect=False,
     )
-    response.raise_for_status()
 
-    content_length = response.headers.get("Content-Length")
+    if http_response.status >= 400:
+        raise SourceUrlValidationError(
+            f"source_url fetch failed with status {http_response.status}"
+        )
+
+    content_length = http_response.headers.get("Content-Length")
     if content_length is not None:
         try:
-            if int(content_length) > max_bytes:
-                raise SourceUrlValidationError(
-                    f"source file exceeds max size ({max_bytes} bytes)"
-                )
+            content_length_int = int(content_length)
         except ValueError as exc:
             raise SourceUrlValidationError("source file Content-Length is invalid") from exc
+        if content_length_int > max_bytes:
+            raise SourceUrlValidationError(
+                f"source file exceeds max size ({max_bytes} bytes)"
+            )
 
     chunks: list[bytes] = []
     total = 0
-    for chunk in response.iter_content(chunk_size=1024 * 1024):
+    for chunk in http_response.stream(1024 * 1024):
         if not chunk:
             continue
         total += len(chunk)
@@ -266,5 +340,5 @@ def fetch_source_file(url: str) -> tuple[bytes, Optional[str]]:
             raise SourceUrlValidationError(f"source file exceeds max size ({max_bytes} bytes)")
         chunks.append(chunk)
 
-    content_type = _strip_mime_parameters(response.headers.get("Content-Type"))
+    content_type = _strip_mime_parameters(http_response.headers.get("Content-Type"))
     return b"".join(chunks), content_type

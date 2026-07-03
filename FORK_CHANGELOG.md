@@ -23,6 +23,18 @@ This file records **semantic changes** in this fork compared to **upstream** (`u
 
 ## Entries
 
+### 2026-07-03 — Simplify outbound URL allowlist and harden async egress
+
+- **Area:** API, security
+- **Summary:** Consolidated six per-role allowlist env vars into `OUTBOUND_URL_ALLOWED_HOST_SUFFIXES` (default `.supabase.co`) and `OUTBOUND_URL_ALLOWED_HOSTS`. Disabled redirect following on PUT/POST; `source_url` fetch uses DNS-pinned urllib3 connections. Async worker now POSTs `callback_url` on failure so Kestra does not hang after `202`.
+- **Related:** `backend-infra-stack/unstructured-elestio/docker-compose.yaml` — use `OUTBOUND_URL_*` instead of `SOURCE_/DESTINATION_/CALLBACK_URL_*`.
+
+### 2026-07-03 — Bump unstructured library to 0.23.1
+
+- **Area:** Dependencies
+- **Summary:** Upgraded `unstructured[all-docs]` from 0.22.18 to 0.23.1 (latest PyPI). Lockfile now resolves for Linux only (`tool.uv.environments`) because 0.23.x pulls `torch` via `unstructured-inference` without macOS x86_64 wheels. API release bumped to `0.1.8`.
+- **Breaking:** `pandas` constraint lowered to `>=2.2.0, <3.0.0` to match `unstructured` 0.23.x. Chunking callers using `isolate_tables` must use `isolate_table` (upstream rename in 0.22.31; not exposed by this API today).
+
 ### 2026-07-03 — GitLab CI lint and test pipeline
 
 - **Area:** CI

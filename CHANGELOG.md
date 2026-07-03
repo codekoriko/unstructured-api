@@ -1,3 +1,18 @@
+## 0.1.8
+
+### Enhancements
+
+- **Bump `unstructured` to 0.23.1** — AcroForm field extraction in PDFs, `enrichment_origins` metadata, and PDF layout fixes from 0.22.19–0.23.1.
+- **Refresh locked dependencies** (FastAPI, unstructured-inference, onnxruntime, etc.).
+
+### Breaking changes
+
+- **`pandas` capped at `<3.0.0`** — required by `unstructured` 0.23.x (`pandas>=2.0.0,<3.0.0` for `all-docs`).
+
+### Notes
+
+- Lockfile resolves for **Linux only** (`tool.uv.environments`); Docker/CI is the supported install path. `unstructured` 0.23.x requires `torch` wheels not published for macOS x86_64.
+
 ## 0.1.7
 
 ### Security
