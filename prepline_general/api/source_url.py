@@ -1,4 +1,4 @@
-"""Secure fetch helpers for async partition requests that reference a remote file."""
+"""Secure fetch and outbound URL validation for async partition requests."""
 
 from __future__ import annotations
 
@@ -17,13 +17,22 @@ BLOCKED_HOSTNAMES = frozenset(
     }
 )
 
-DEFAULT_ALLOWED_HOST_SUFFIXES = ".supabase.co"
+DEFAULT_SOURCE_HOST_SUFFIXES = ".supabase.co"
+DEFAULT_DESTINATION_HOST_SUFFIXES = ".supabase.co"
 DEFAULT_MAX_BYTES = 500 * 1024 * 1024
 DEFAULT_FETCH_TIMEOUT_SECONDS = 300
 
+SOURCE_ALLOWED_SUFFIXES_ENV = "SOURCE_URL_ALLOWED_HOST_SUFFIXES"
+SOURCE_ALLOWED_HOSTS_ENV = "SOURCE_URL_ALLOWED_HOSTS"
+DESTINATION_ALLOWED_SUFFIXES_ENV = "DESTINATION_URL_ALLOWED_HOST_SUFFIXES"
+DESTINATION_ALLOWED_HOSTS_ENV = "DESTINATION_URL_ALLOWED_HOSTS"
+CALLBACK_ALLOWED_SUFFIXES_ENV = "CALLBACK_URL_ALLOWED_HOST_SUFFIXES"
+CALLBACK_ALLOWED_HOSTS_ENV = "CALLBACK_URL_ALLOWED_HOSTS"
+OUTBOUND_ALLOW_HTTP_ENV = "OUTBOUND_URL_ALLOW_HTTP"
+
 
 class SourceUrlValidationError(ValueError):
-    """Raised when a source_url fails security validation."""
+    """Raised when an outbound async URL fails security validation."""
 
 
 def _truthy_env(name: str) -> bool:
@@ -35,17 +44,13 @@ def _parse_csv_env(name: str) -> frozenset[str]:
     return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
 
 
-def _allowed_host_suffixes() -> frozenset[str]:
-    raw = os.environ.get("SOURCE_URL_ALLOWED_HOST_SUFFIXES", DEFAULT_ALLOWED_HOST_SUFFIXES)
+def _parse_suffix_env(name: str, default: str) -> frozenset[str]:
+    raw = os.environ.get(name, default)
     return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
 
 
-def _allowed_hosts() -> frozenset[str]:
-    return _parse_csv_env("SOURCE_URL_ALLOWED_HOSTS")
-
-
 def _http_allowed() -> bool:
-    return _truthy_env("SOURCE_URL_ALLOW_HTTP")
+    return _truthy_env(OUTBOUND_ALLOW_HTTP_ENV) or _truthy_env("SOURCE_URL_ALLOW_HTTP")
 
 
 def _max_bytes() -> int:
@@ -62,6 +67,17 @@ def _strip_mime_parameters(content_type: str | None) -> str | None:
     return content_type.split(";", 1)[0].strip()
 
 
+def _hostname_matches_suffix(host: str, suffix: str) -> bool:
+    """True when host equals suffix or is a proper subdomain (dot-boundary match)."""
+    normalized_suffix = suffix.lower().lstrip(".")
+    if not normalized_suffix:
+        return False
+    normalized_host = host.lower().rstrip(".")
+    if normalized_host == normalized_suffix:
+        return True
+    return normalized_host.endswith(f".{normalized_suffix}")
+
+
 def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return (
         ip.is_private
@@ -73,20 +89,25 @@ def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def _hostname_is_allowed(hostname: str) -> bool:
+def _hostname_is_allowed(
+    hostname: str,
+    *,
+    allowed_hosts: frozenset[str],
+    allowed_suffixes: frozenset[str],
+) -> bool:
     host = hostname.lower().rstrip(".")
-    if host in _allowed_hosts():
+    if host in allowed_hosts:
         return True
     if host in BLOCKED_HOSTNAMES:
         return False
-    return any(host.endswith(suffix) for suffix in _allowed_host_suffixes())
+    return any(_hostname_matches_suffix(host, suffix) for suffix in allowed_suffixes)
 
 
 def _check_resolved_ips(hostname: str) -> None:
     try:
         addrinfo = socket.getaddrinfo(hostname, None)
     except socket.gaierror as exc:
-        raise SourceUrlValidationError(f"Cannot resolve source_url host: {hostname}") from exc
+        raise SourceUrlValidationError(f"Cannot resolve URL host: {hostname}") from exc
 
     for _, _, _, _, sockaddr in addrinfo:
         ip_str = sockaddr[0]
@@ -95,23 +116,20 @@ def _check_resolved_ips(hostname: str) -> None:
         except ValueError:
             continue
         if _ip_is_blocked(ip):
-            raise SourceUrlValidationError(f"source_url resolves to blocked address: {ip_str}")
+            raise SourceUrlValidationError(f"URL resolves to blocked address: {ip_str}")
 
 
-def validate_source_url(url: str) -> str:
-    """Validate a remote file URL before the worker fetches it.
-
-  Security controls:
-  - HTTPS only by default (`SOURCE_URL_ALLOW_HTTP=true` for local dev)
-  - Host allowlist via suffixes (`SOURCE_URL_ALLOWED_HOST_SUFFIXES`) and/or exact hosts
-    (`SOURCE_URL_ALLOWED_HOSTS`)
-  - Blocks private, loopback, link-local, and metadata-style targets
-  - Rejects embedded credentials and non-http(s) schemes
-  - DNS resolution checked to reduce SSRF via allowed-looking hostnames
-    """
+def _validate_outbound_url(
+    url: str,
+    *,
+    url_label: str,
+    allowed_hosts: frozenset[str],
+    allowed_suffixes: frozenset[str],
+    resolve_dns: bool,
+) -> str:
     cleaned = url.strip()
     if not cleaned:
-        raise SourceUrlValidationError("source_url is empty")
+        raise SourceUrlValidationError(f"{url_label} is empty")
 
     parsed = urlparse(cleaned)
     scheme = (parsed.scheme or "").lower()
@@ -120,29 +138,82 @@ def validate_source_url(url: str) -> str:
     elif scheme == "http" and _http_allowed():
         pass
     else:
-        raise SourceUrlValidationError("source_url must use https")
+        raise SourceUrlValidationError(f"{url_label} must use https")
 
     hostname = parsed.hostname
     if not hostname:
-        raise SourceUrlValidationError("source_url is missing a host")
+        raise SourceUrlValidationError(f"{url_label} is missing a host")
 
     if parsed.username or parsed.password:
-        raise SourceUrlValidationError("source_url must not contain embedded credentials")
+        raise SourceUrlValidationError(f"{url_label} must not contain embedded credentials")
+
+    if not allowed_hosts and not allowed_suffixes:
+        raise SourceUrlValidationError(
+            f"{url_label} host is not allowed (no outbound allowlist configured)",
+        )
 
     try:
         ip = ipaddress.ip_address(hostname)
     except ValueError:
-        if not _hostname_is_allowed(hostname):
-            raise SourceUrlValidationError("source_url host is not allowed")
-        _check_resolved_ips(hostname)
+        if not _hostname_is_allowed(
+            hostname,
+            allowed_hosts=allowed_hosts,
+            allowed_suffixes=allowed_suffixes,
+        ):
+            raise SourceUrlValidationError(f"{url_label} host is not allowed")
+        if resolve_dns:
+            _check_resolved_ips(hostname)
     else:
-        explicitly_allowed = hostname.lower() in _allowed_hosts()
+        explicitly_allowed = hostname.lower() in allowed_hosts
         if _ip_is_blocked(ip) and not explicitly_allowed:
-            raise SourceUrlValidationError("source_url host IP is not allowed")
-        if not _hostname_is_allowed(hostname):
-            raise SourceUrlValidationError("source_url host is not allowed")
+            raise SourceUrlValidationError(f"{url_label} host IP is not allowed")
+        if not _hostname_is_allowed(
+            hostname,
+            allowed_hosts=allowed_hosts,
+            allowed_suffixes=allowed_suffixes,
+        ):
+            raise SourceUrlValidationError(f"{url_label} host is not allowed")
 
     return cleaned
+
+
+def validate_source_url(url: str) -> str:
+    """Validate a signed download URL before the worker fetches the input file."""
+    return _validate_outbound_url(
+        url,
+        url_label="source_url",
+        allowed_hosts=_parse_csv_env(SOURCE_ALLOWED_HOSTS_ENV),
+        allowed_suffixes=_parse_suffix_env(
+            SOURCE_ALLOWED_SUFFIXES_ENV,
+            DEFAULT_SOURCE_HOST_SUFFIXES,
+        ),
+        resolve_dns=True,
+    )
+
+
+def validate_destination_url(url: str) -> str:
+    """Validate the signed upload URL where extraction JSON is written."""
+    return _validate_outbound_url(
+        url,
+        url_label="destination_url",
+        allowed_hosts=_parse_csv_env(DESTINATION_ALLOWED_HOSTS_ENV),
+        allowed_suffixes=_parse_suffix_env(
+            DESTINATION_ALLOWED_SUFFIXES_ENV,
+            DEFAULT_DESTINATION_HOST_SUFFIXES,
+        ),
+        resolve_dns=True,
+    )
+
+
+def validate_callback_url(url: str) -> str:
+    """Validate the orchestrator webhook URL resumed after async extraction."""
+    return _validate_outbound_url(
+        url,
+        url_label="callback_url",
+        allowed_hosts=_parse_csv_env(CALLBACK_ALLOWED_HOSTS_ENV),
+        allowed_suffixes=_parse_suffix_env(CALLBACK_ALLOWED_SUFFIXES_ENV, ""),
+        resolve_dns=True,
+    )
 
 
 def validate_source_filename(filename: str | None) -> str:

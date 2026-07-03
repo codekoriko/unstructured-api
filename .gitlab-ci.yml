@@ -1,24 +1,73 @@
-# Publishes the Unstructured API Docker image to this private project's GitLab Container Registry
-# on every push to main (i.e. after a merge).
+# GitLab CI for contradic-unstructured-api
 #
-# Registry image: registry.gitlab.com/contradic/contradic-unstructured-api
+# - lint + test: merge requests and branch pushes
+# - docker-publish: main only, after tests pass
 #
-# Push auth (private project):
-# - Default: GitLab-injected CI_REGISTRY_USER + CI_REGISTRY_PASSWORD (CI_JOB_TOKEN).
-#   Ensure Settings → CI/CD → Job token permissions allow this project to write
-#   its own container registry.
-# - Optional fallback: set masked CI/CD variables REGISTRY_DEPLOY_USER and
-#   REGISTRY_DEPLOY_TOKEN (deploy token with write_registry) if job-token access
-#   is restricted in your group.
+# Registry: registry.gitlab.com/contradic/contradic-unstructured-api
 
 stages:
+  - lint
+  - test
   - publish
 
 variables:
+  PIPELINE_PACKAGE: "general"
   DOCKER_TLS_CERTDIR: "/certs"
   DOCKER_DRIVER: overlay2
-  PIPELINE_PACKAGE: "general"
   IMAGE_NAME: $CI_REGISTRY_IMAGE
+  UV_CACHE_DIR: $CI_PROJECT_DIR/.cache/uv
+  UV_LINK_MODE: copy
+
+default:
+  cache:
+    key:
+      files:
+        - uv.lock
+    paths:
+      - .cache/uv/
+
+.ci-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+.python-job:
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm
+  extends: .ci-rules
+  before_script:
+    - uv python install "$(cat .python-version)"
+
+lint:
+  extends: .python-job
+  stage: lint
+  script:
+    - uv sync --only-group lint --locked
+    - make check
+
+shellcheck:
+  extends: .ci-rules
+  stage: lint
+  image: koalaman/shellcheck-alpine:stable
+  script:
+    - find scripts -name "*.sh" -exec shellcheck {} +
+
+test:
+  extends: .python-job
+  stage: test
+  needs:
+    - lint
+    - shellcheck
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq poppler-utils libreoffice wget git ca-certificates sudo tesseract-ocr tesseract-ocr-kor
+    - uv python install "$(cat .python-version)"
+  script:
+    - uv sync --group test --locked
+    - make install-pandoc
+    - make install-nlp-models
+    - tesseract --version
+    - make test
+    - make check-coverage
 
 docker-publish:
   stage: publish
@@ -26,6 +75,8 @@ docker-publish:
   services:
     - name: docker:27.4-dind
       alias: docker
+  needs:
+    - test
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   before_script:

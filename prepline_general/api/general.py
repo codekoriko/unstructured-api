@@ -42,6 +42,8 @@ from prepline_general.api.models.form_params import GeneralFormParams
 from prepline_general.api.source_url import (
     SourceUrlValidationError,
     fetch_source_file,
+    validate_callback_url,
+    validate_destination_url,
     validate_source_filename,
     validate_source_url,
 )
@@ -722,14 +724,16 @@ def process_and_callback(
             logger.info("Extraction successful for %s. Serialized to JSON (%d bytes)", filename, len(result_data))
 
         if form_params.destination_url:
+            destination_url = validate_destination_url(form_params.destination_url)
             logger.info("Attempting to PUT extraction results to destination_url for %s", filename)
-            put_resp = requests.put(form_params.destination_url, data=result_data, headers=headers)
+            put_resp = requests.put(destination_url, data=result_data, headers=headers)
             if not put_resp.ok:
                 logger.error("PUT to destination_url failed with status %d: %s", put_resp.status_code, put_resp.text)
             put_resp.raise_for_status()
             logger.info("Successfully uploaded extraction results to destination_url for %s", filename)
 
         if form_params.callback_url:
+            callback_url = validate_callback_url(form_params.callback_url)
             logger.info("Attempting to POST to Kestra callback_url for %s", filename)
             kwargs = {}
             if form_params.callback_headers:
@@ -738,7 +742,7 @@ def process_and_callback(
                 except Exception as e:
                     logger.warning("Failed to parse callback_headers for %s: %s", filename, str(e))
 
-            post_resp = requests.post(form_params.callback_url, **kwargs)
+            post_resp = requests.post(callback_url, **kwargs)
             if not post_resp.ok:
                 logger.error("POST to callback_url failed with status %d: %s", post_resp.status_code, post_resp.text)
             post_resp.raise_for_status()
@@ -783,7 +787,8 @@ def general_partition(
         api_key = request.headers.get("unstructured-api-key")
         if api_key != api_key_env:
             raise HTTPException(
-                detail=f"API key {api_key} is invalid", status_code=status.HTTP_401_UNAUTHORIZED
+                detail="Invalid or missing API key",
+                status_code=status.HTTP_401_UNAUTHORIZED,
             )
 
     accept_type = request.headers.get("Accept")
@@ -816,6 +821,16 @@ def general_partition(
             files[idx] = ungz_file(file, form_params.gz_uncompressed_content_type)
 
     if form_params.destination_url:
+        try:
+            validate_destination_url(form_params.destination_url)
+            if form_params.callback_url:
+                validate_callback_url(form_params.callback_url)
+        except SourceUrlValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
         request_headers = dict(request.headers)
         file_content: Optional[bytes]
         filename: str

@@ -23,6 +23,18 @@ This file records **semantic changes** in this fork compared to **upstream** (`u
 
 ## Entries
 
+### 2026-07-03 — GitLab CI lint and test pipeline
+
+- **Area:** CI
+- **Summary:** Extended `.gitlab-ci.yml` with `lint`, `shellcheck`, and `test` jobs on merge requests and branch pushes. `docker-publish` on `main` now depends on `test` passing.
+- **Related:** `README_DEV.md` — CI stage table.
+
+### 2026-06-29 — Outbound URL allowlists and auth hardening
+
+- **Area:** API, security
+- **Summary:** Added SSRF allowlist validation for `destination_url` and `callback_url` (env: `DESTINATION_URL_*`, `CALLBACK_URL_*`), tightened hostname suffix matching to require a dot boundary, and stopped echoing API keys in 401 responses.
+- **Related:** `backend-infra-stack/unstructured-elestio/docker-compose.yaml` — set `CALLBACK_URL_ALLOWED_HOST_SUFFIXES` or `CALLBACK_URL_ALLOWED_HOSTS` to match your Kestra API host; `DESTINATION_URL_ALLOWED_HOST_SUFFIXES` defaults to `.supabase.co` like `source_url`. Env var reference: `README_DEV.md` § Async outbound URL environment variables.
+
 ### 2026-06-29 — Sync upstream to 0.1.7
 
 - **Area:** Dependencies, Docker, API
