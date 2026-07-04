@@ -71,14 +71,6 @@ def test_validate_source_url_allows_exact_host(monkeypatch: pytest.MonkeyPatch, 
     assert validate_source_url(url) == url
 
 
-def test_legacy_per_role_env_vars_are_merged(monkeypatch: pytest.MonkeyPatch, public_dns: None):
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOST_SUFFIXES", raising=False)
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOSTS", raising=False)
-    monkeypatch.setenv("CALLBACK_URL_ALLOWED_HOSTS", "kestra.internal")
-    url = "https://kestra.internal/api/v1/main/executions/1/resume"
-    assert validate_callback_url(url) == url
-
-
 def test_validate_source_url_rejects_dns_to_private_ip(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "prepline_general.api.source_url.socket.getaddrinfo",

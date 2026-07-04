@@ -27,18 +27,6 @@ OUTBOUND_ALLOWED_SUFFIXES_ENV = "OUTBOUND_URL_ALLOWED_HOST_SUFFIXES"
 OUTBOUND_ALLOWED_HOSTS_ENV = "OUTBOUND_URL_ALLOWED_HOSTS"
 OUTBOUND_ALLOW_HTTP_ENV = "OUTBOUND_URL_ALLOW_HTTP"
 
-# Deprecated per-role variables (still read as fallbacks when unified vars are unset).
-_LEGACY_SUFFIX_ENVS = (
-    "SOURCE_URL_ALLOWED_HOST_SUFFIXES",
-    "DESTINATION_URL_ALLOWED_HOST_SUFFIXES",
-    "CALLBACK_URL_ALLOWED_HOST_SUFFIXES",
-)
-_LEGACY_HOST_ENVS = (
-    "SOURCE_URL_ALLOWED_HOSTS",
-    "DESTINATION_URL_ALLOWED_HOSTS",
-    "CALLBACK_URL_ALLOWED_HOSTS",
-)
-
 
 class SourceUrlValidationError(ValueError):
     """Raised when an outbound async URL fails security validation."""
@@ -75,16 +63,11 @@ def _outbound_timeout_seconds() -> int:
 
 
 def _allowed_hosts() -> frozenset[str]:
-    hosts = _parse_csv_env(OUTBOUND_ALLOWED_HOSTS_ENV)
-    for legacy_env in _LEGACY_HOST_ENVS:
-        hosts |= _parse_csv_env(legacy_env)
-    return hosts
+    return _parse_csv_env(OUTBOUND_ALLOWED_HOSTS_ENV)
 
 
 def _allowed_suffixes() -> frozenset[str]:
     suffixes = _parse_csv_env(OUTBOUND_ALLOWED_SUFFIXES_ENV)
-    for legacy_env in _LEGACY_SUFFIX_ENVS:
-        suffixes |= _parse_csv_env(legacy_env)
     if suffixes:
         return suffixes
     return _parse_suffix_env(OUTBOUND_ALLOWED_SUFFIXES_ENV, DEFAULT_OUTBOUND_HOST_SUFFIXES)

@@ -57,28 +57,32 @@ On deployment hosts, store credentials in `~/.docker/config.json` or your orches
 
 These variables apply when callers use **async partition** (`destination_url` set). The API validates every outbound HTTPS URL (`source_url` GET, `destination_url` PUT, `callback_url` POST) against a **single shared allowlist**. Requests do not follow redirects; `source_url` downloads pin DNS at connect time.
 
-### Configuration (two allowlist variables)
+### Configuration
 
-| Variable | Required? | Default | Purpose |
-|----------|-----------|---------|---------|
-| `OUTBOUND_URL_ALLOWED_HOST_SUFFIXES` | No* | `.supabase.co` | Comma-separated suffixes (dot-boundary match) for all outbound URLs |
-| `OUTBOUND_URL_ALLOWED_HOSTS` | No* | *(empty)* | Comma-separated exact hostnames (e.g. Kestra, local Kong) |
-| `OUTBOUND_URL_ALLOW_HTTP` | No | off | Dev only — allow `http://` outbound URLs |
-| `OUTBOUND_URL_TIMEOUT_SECONDS` | No | `300` | Timeout for PUT/POST outbound calls |
-| `SOURCE_URL_MAX_BYTES` | No | `524288000` | Max `source_url` download size |
-| `SOURCE_URL_FETCH_TIMEOUT_SECONDS` | No | `300` | Timeout for `source_url` fetch |
+| Variable | Default | When you need it |
+|----------|---------|------------------|
+| `OUTBOUND_URL_ALLOWED_HOST_SUFFIXES` | `.supabase.co` | **Production minimum.** Matches multi-tenant hosts (`*.supabase.co` per project). Add your Kestra domain suffix here too (e.g. `.your-kestra-domain.com`). |
+| `OUTBOUND_URL_ALLOWED_HOSTS` | *(empty)* | **Optional.** Exact hostnames or IPs that suffixes cannot express: local dev (`127.0.0.1`, `localhost`, `kong`), or a single Kestra host when you do not want to allow an entire domain suffix. |
+| `OUTBOUND_URL_ALLOW_HTTP` | off | Dev only |
+| `OUTBOUND_URL_TIMEOUT_SECONDS` | `300` | PUT/POST timeout |
+| `SOURCE_URL_MAX_BYTES` | 500 MiB | Download cap |
+| `SOURCE_URL_FETCH_TIMEOUT_SECONDS` | `300` | Download timeout |
 
-\*At least one of the two allowlist variables must cover your hosts. Default suffix `.supabase.co` covers Supabase signed `source_url` / `destination_url`. Add your **Kestra** host via suffix or `OUTBOUND_URL_ALLOWED_HOSTS` for `callback_url`.
+**Do you need both suffix and hosts?** Usually **suffixes only** in production:
 
-Deprecated per-role variables (`SOURCE_URL_*`, `DESTINATION_URL_*`, `CALLBACK_URL_*`) are still read as fallbacks but are no longer documented for new deployments.
+```yaml
+OUTBOUND_URL_ALLOWED_HOST_SUFFIXES: .supabase.co,.your-kestra-domain.com
+```
+
+Use `OUTBOUND_URL_ALLOWED_HOSTS` only when exact matching is clearer or required (single Kestra hostname without widening to `.example.com`, or local Supabase/Kong on `localhost` / `127.0.0.1`).
+
+Deprecated per-role variables (`SOURCE_URL_*`, `DESTINATION_URL_*`, `CALLBACK_URL_*`) were removed; use `OUTBOUND_URL_*` only.
 
 ### Contradic deployment example
 
 ```yaml
 UNSTRUCTURED_API_KEY: ${API_KEY}
 OUTBOUND_URL_ALLOWED_HOST_SUFFIXES: .supabase.co,.your-kestra-domain.com
-# Or exact Kestra host:
-# OUTBOUND_URL_ALLOWED_HOSTS: kestra.your-domain.com
 ```
 
 Local Supabase/Kong:
