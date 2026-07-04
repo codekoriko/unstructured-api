@@ -4,13 +4,14 @@ This document explains the process for building, tagging, and pushing Docker ima
 
 ## GitLab CI (recommended for production)
 
-The GitLab project and its container registry are **private**. CI runs on **every merge request and branch push**:
+The GitLab project and its container registry are **private**. CI runs on **merge requests and pushes to `main` only** (other branch pushes are skipped):
 
 | Stage | Job | What it does |
 |-------|-----|----------------|
-| `lint` | `lint` | `uv sync --only-group lint` + `make check` (ruff, mypy, version sync) |
-| `lint` | `shellcheck` | `scripts/shellcheck.sh` |
-| `test` | `test` | Full test suite (`make test`, coverage ≥ 60%) with poppler, LibreOffice, Tesseract, pandoc |
+| `lint` | `lint` | ruff format/check + CHANGELOG version sync |
+| `lint` | `shellcheck` | shell script lint |
+| `typecheck` | `typecheck` | mypy on `prepline_general/api` |
+| `test` | `test` | pytest + coverage (≥ 60%) |
 | `publish` | `docker-publish` | **main only** — build and push image after `test` passes |
 
 On push to `main`, the pipeline also publishes the Docker image:

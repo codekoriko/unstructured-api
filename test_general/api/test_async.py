@@ -1,6 +1,6 @@
+import socket
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import socket
 
 import pytest
 from fastapi.testclient import TestClient

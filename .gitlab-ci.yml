@@ -1,17 +1,19 @@
 # GitLab CI for contradic-unstructured-api
 #
-# - lint + test: merge requests and branch pushes
-# - docker-publish: main only, after tests pass
+# Runs on merge requests and pushes to main only:
+#   lint → typecheck → test → docker-publish (main only)
 #
 # Registry: registry.gitlab.com/contradic/contradic-unstructured-api
 
 stages:
   - lint
+  - typecheck
   - test
   - publish
 
 variables:
   PIPELINE_PACKAGE: "general"
+  PACKAGE_NAME: "prepline_general"
   DOCKER_TLS_CERTDIR: "/certs"
   DOCKER_DRIVER: overlay2
   IMAGE_NAME: $CI_REGISTRY_IMAGE
@@ -26,10 +28,11 @@ default:
     paths:
       - .cache/uv/
 
+# Merge requests and main branch pushes only (skip other feature-branch pushes).
 .ci-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
 
 .python-job:
   image: ghcr.io/astral-sh/uv:python3.12-bookworm
@@ -42,7 +45,20 @@ lint:
   stage: lint
   script:
     - uv sync --only-group lint --locked
-    - make check
+    - uv run --no-sync ruff format --check ${PACKAGE_NAME}
+    - uv run --no-sync ruff check ${PACKAGE_NAME}
+    - uv run --no-sync ruff format --check test_${PIPELINE_PACKAGE} scripts/smoketest.py
+    - uv run --no-sync ruff check test_${PIPELINE_PACKAGE} scripts/smoketest.py
+    - make check-version
+
+typecheck:
+  extends: .python-job
+  stage: typecheck
+  needs:
+    - lint
+  script:
+    - uv sync --only-group lint --locked
+    - uv run --no-sync mypy ${PACKAGE_NAME} --ignore-missing-imports --implicit-optional
 
 shellcheck:
   extends: .ci-rules
@@ -56,6 +72,7 @@ test:
   stage: test
   needs:
     - lint
+    - typecheck
     - shellcheck
   before_script:
     - apt-get update -qq

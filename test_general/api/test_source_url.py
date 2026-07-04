@@ -1,9 +1,8 @@
+import socket
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-import socket
 
 import pytest
-import requests
 
 from prepline_general.api.source_url import (
     SourceUrlValidationError,

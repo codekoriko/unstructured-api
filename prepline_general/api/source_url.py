@@ -122,7 +122,7 @@ def _first_allowed_ip(hostname: str) -> str:
         raise SourceUrlValidationError(f"Cannot resolve URL host: {hostname}") from exc
 
     for _, _, _, _, sockaddr in addrinfo:
-        ip_str = sockaddr[0]
+        ip_str = str(sockaddr[0])
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
