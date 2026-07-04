@@ -35,6 +35,11 @@ This file records **semantic changes** in this fork compared to **upstream** (`u
 - **Summary:** Upgraded `unstructured[all-docs]` from 0.22.18 to 0.23.1 (latest PyPI). Lockfile now resolves for Linux only (`tool.uv.environments`) because 0.23.x pulls `torch` via `unstructured-inference` without macOS x86_64 wheels. API release bumped to `0.1.8`.
 - **Breaking:** `pandas` constraint lowered to `>=2.2.0, <3.0.0` to match `unstructured` 0.23.x. Chunking callers using `isolate_tables` must use `isolate_table` (upstream rename in 0.22.31; not exposed by this API today).
 
+### 2026-07-04 — CPU-only PyTorch for CI and production
+
+- **Area:** Dependencies, CI
+- **Summary:** Pin `torch` and `torchvision` to the PyTorch CPU index via `tool.uv.sources`, avoiding multi-GB NVIDIA CUDA wheels that exhausted GitLab runner disk during `uv sync`. CI uses `UV_LINK_MODE=hardlink` and apt cache cleanup before the test job.
+
 ### 2026-07-03 — GitLab CI lint and test pipeline
 
 - **Area:** CI

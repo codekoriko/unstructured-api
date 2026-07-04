@@ -18,7 +18,7 @@ variables:
   DOCKER_DRIVER: overlay2
   IMAGE_NAME: $CI_REGISTRY_IMAGE
   UV_CACHE_DIR: $CI_PROJECT_DIR/.cache/uv
-  UV_LINK_MODE: copy
+  UV_LINK_MODE: hardlink
 
 default:
   cache:
@@ -75,10 +75,15 @@ test:
     - typecheck
     - shellcheck
   before_script:
+    - df -h
+    - apt-get clean || true
+    - rm -rf /var/lib/apt/lists/* /tmp/* || true
     - apt-get update -qq
     - apt-get install -y -qq poppler-utils libreoffice wget git ca-certificates sudo tesseract-ocr tesseract-ocr-kor
+    - apt-get clean && rm -rf /var/lib/apt/lists/*
     - uv python install "$(cat .python-version)"
   script:
+    - df -h
     - uv sync --group test --locked
     - make install-pandoc
     - make install-nlp-models

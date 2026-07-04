@@ -52,7 +52,7 @@ docker pull registry.gitlab.com/contradic/contradic-unstructured-api:latest
 
 On deployment hosts, store credentials in `~/.docker/config.json` or your orchestrator's secret store (Elestio, Infisical, etc.).
 
-**Note:** `uv.lock` is resolved for **Linux** (`tool.uv.environments` in `pyproject.toml`) because `unstructured` 0.23.x depends on `torch` wheels that are not published for macOS x86_64. Use Docker or GitLab CI to build and test; local `uv sync` on Intel Mac may not install the full runtime graph.
+**Note:** `uv.lock` is resolved for **Linux** (`tool.uv.environments` in `pyproject.toml`) because `unstructured` 0.23.x depends on `torch` wheels that are not published for macOS x86_64. `torch` / `torchvision` are pinned to the [PyTorch CPU index](https://download.pytorch.org/whl/cpu) so CI and Docker images avoid multi-GB NVIDIA CUDA packages. Use Docker or GitLab CI to build and test; local `uv sync` on Intel Mac may not install the full runtime graph.
 
 ## Async outbound URL environment variables
 

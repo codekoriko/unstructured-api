@@ -14,6 +14,9 @@ dependencies = [
     "pypdf >=6.0.0, <7.0.0",
     "requests >=2.32.0, <3.0.0",
     "pyinstrument >=5.0.0, <6.0.0",
+    # Direct deps so tool.uv.sources pins CPU wheels (avoids multi-GB NVIDIA CUDA packages).
+    "torch >=2.10.0",
+    "torchvision >=0.25.0",
 ]
 
 [dependency-groups]
@@ -54,10 +57,20 @@ constraint-dependencies = [
     "lxml>=6.1.1",
 ]
 
+# CPU-only PyTorch — avoids multi-GB NVIDIA CUDA wheels on CI runners and CPU servers.
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
 [[tool.uv.index]]
 name = "pypi"
 url = "https://pypi.org/simple"
 default = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pyright]
 pythonPlatform = "Linux"
