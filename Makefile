@@ -1,6 +1,7 @@
 PIPELINE_FAMILY := general
 PIPELINE_PACKAGE := general
 PACKAGE_NAME := prepline_${PIPELINE_PACKAGE}
+PYTEST_XDIST ?= auto
 
 .PHONY: help
 help: Makefile
@@ -94,7 +95,7 @@ run-web-app:
 ## test:                        runs core tests
 .PHONY: test
 test:
-	PYTHONPATH=. uv run pytest -n auto -v test_${PIPELINE_PACKAGE} --cov=${PACKAGE_NAME} --cov-report term-missing
+	PYTHONPATH=. uv run pytest -n $(PYTEST_XDIST) -v test_${PIPELINE_PACKAGE} --cov=${PACKAGE_NAME} --cov-report term-missing
 
 # Setting a low bar here - need more tests!
 .PHONY: check-coverage

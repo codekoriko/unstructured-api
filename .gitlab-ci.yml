@@ -19,6 +19,10 @@ variables:
   IMAGE_NAME: $CI_REGISTRY_IMAGE
   UV_CACHE_DIR: $CI_PROJECT_DIR/.cache/uv
   UV_LINK_MODE: hardlink
+  # Shared GitLab runners OOM/thrash with pytest-xdist -n auto + torch inference.
+  PYTEST_XDIST: "2"
+  HF_HOME: $CI_PROJECT_DIR/.cache/huggingface
+  TORCH_HOME: $CI_PROJECT_DIR/.cache/torch
 
 default:
   cache:
@@ -27,6 +31,8 @@ default:
         - uv.lock
     paths:
       - .cache/uv/
+      - .cache/huggingface/
+      - .cache/torch/
 
 # Merge requests and main branch pushes only (skip other feature-branch pushes).
 .ci-rules:
