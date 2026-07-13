@@ -1,0 +1,144 @@
+# GitLab CI for contradic-unstructured-api
+#
+# Runs on merge requests and pushes to main only:
+#   lint → typecheck → test → docker-publish (main only)
+#
+# Registry: registry.gitlab.com/contradic/contradic-unstructured-api
+
+stages:
+  - lint
+  - typecheck
+  - test
+  - publish
+
+variables:
+  PIPELINE_PACKAGE: "general"
+  PACKAGE_NAME: "prepline_general"
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_DRIVER: overlay2
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  UV_CACHE_DIR: $CI_PROJECT_DIR/.cache/uv
+  UV_LINK_MODE: hardlink
+  # Shared GitLab runners OOM/thrash with pytest-xdist -n auto + torch inference.
+  PYTEST_XDIST: "2"
+  HF_HOME: $CI_PROJECT_DIR/.cache/huggingface
+  TORCH_HOME: $CI_PROJECT_DIR/.cache/torch
+
+default:
+  cache:
+    key:
+      files:
+        - uv.lock
+    paths:
+      - .cache/uv/
+      - .cache/huggingface/
+      - .cache/torch/
+
+# Merge requests and main branch pushes only (skip other feature-branch pushes).
+.ci-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+.python-job:
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm
+  extends: .ci-rules
+  before_script:
+    - uv python install "$(cat .python-version)"
+
+lint:
+  extends: .python-job
+  stage: lint
+  script:
+    - uv sync --only-group lint --locked
+    - uv run --no-sync ruff format --check ${PACKAGE_NAME}
+    - uv run --no-sync ruff check ${PACKAGE_NAME}
+    - uv run --no-sync ruff format --check test_${PIPELINE_PACKAGE} scripts/smoketest.py
+    - uv run --no-sync ruff check test_${PIPELINE_PACKAGE} scripts/smoketest.py
+    - make check-version
+
+typecheck:
+  extends: .python-job
+  stage: typecheck
+  needs:
+    - lint
+  script:
+    - uv sync --only-group lint --locked
+    - uv run --no-sync mypy ${PACKAGE_NAME} --ignore-missing-imports --implicit-optional
+
+shellcheck:
+  extends: .ci-rules
+  stage: lint
+  image: koalaman/shellcheck-alpine:stable
+  script:
+    - find scripts -name "*.sh" -exec shellcheck {} +
+
+test:
+  extends: .python-job
+  stage: test
+  needs:
+    - lint
+    - typecheck
+    - shellcheck
+  before_script:
+    - df -h
+    - apt-get clean || true
+    - rm -rf /var/lib/apt/lists/* /tmp/* || true
+    - apt-get update -qq
+    - apt-get install -y -qq poppler-utils libreoffice wget git ca-certificates sudo tesseract-ocr tesseract-ocr-kor
+    - apt-get clean && rm -rf /var/lib/apt/lists/*
+    - uv python install "$(cat .python-version)"
+  script:
+    - df -h
+    - uv sync --group test --locked
+    - make install-pandoc
+    - make install-nlp-models
+    - tesseract --version
+    - make test
+    - make check-coverage
+
+docker-publish:
+  stage: publish
+  image: docker:27.4-cli
+  services:
+    - name: docker:27.4-dind
+      alias: docker
+  needs:
+    - test
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    - docker info
+    - |
+      if [ -n "${REGISTRY_DEPLOY_USER:-}" ] && [ -n "${REGISTRY_DEPLOY_TOKEN:-}" ]; then
+        echo "Logging in to ${CI_REGISTRY} with deploy token"
+        echo "$REGISTRY_DEPLOY_TOKEN" | docker login -u "$REGISTRY_DEPLOY_USER" --password-stdin "$CI_REGISTRY"
+      else
+        echo "Logging in to ${CI_REGISTRY} with CI job token"
+        echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+      fi
+  script:
+    - |
+      echo "Disk usage before cleanup:"
+      df -h
+      docker system prune -af --volumes || true
+      echo "Disk usage after cleanup:"
+      df -h
+    - export VERSION="$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' prepline_general/api/__version__.py)"
+    - |
+      if [ -z "$VERSION" ]; then
+        echo "Could not read __version__ from prepline_general/api/__version__.py"
+        exit 1
+      fi
+    - echo "Building ${IMAGE_NAME} (version=${VERSION}, sha=${CI_COMMIT_SHORT_SHA})"
+    - |
+      DOCKER_BUILDKIT=1 docker build \
+        --build-arg PIPELINE_PACKAGE="${PIPELINE_PACKAGE}" \
+        --progress=plain \
+        -t "${IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}" \
+        -t "${IMAGE_NAME}:latest" \
+        -t "${IMAGE_NAME}:${VERSION}" \
+        .
+    - docker push "${IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${IMAGE_NAME}:latest"
+    - docker push "${IMAGE_NAME}:${VERSION}"

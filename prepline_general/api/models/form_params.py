@@ -29,6 +29,8 @@ class GeneralFormParams(BaseModel):
     unique_element_ids: bool
     # -- async options --
     destination_url: Optional[str]
+    source_url: Optional[str]
+    source_filename: Optional[str]
     callback_url: Optional[str]
     callback_headers: Optional[str]
     # -- chunking options --
@@ -280,6 +282,25 @@ level of "pollution" of otherwise clean semantic chunk boundaries. Default: Fals
             ),
             BeforeValidator(SmartValueParser[str]().value_or_first_element),
         ] = None,
+        source_url: Annotated[
+            Optional[str],
+            Form(
+                title="Source URL",
+                description=(
+                    "HTTPS URL of the input file to fetch asynchronously. "
+                    "Requires destination_url and source_filename; mutually exclusive with file upload."
+                ),
+            ),
+            BeforeValidator(SmartValueParser[str]().value_or_first_element),
+        ] = None,
+        source_filename: Annotated[
+            Optional[str],
+            Form(
+                title="Source Filename",
+                description="Basename used for type detection when source_url is provided",
+            ),
+            BeforeValidator(SmartValueParser[str]().value_or_first_element),
+        ] = None,
         callback_url: Annotated[
             Optional[str],
             Form(
@@ -324,6 +345,8 @@ level of "pollution" of otherwise clean semantic chunk boundaries. Default: Fals
             overlap_all=overlap_all,
             unique_element_ids=unique_element_ids,
             destination_url=destination_url,
+            source_url=source_url,
+            source_filename=source_filename,
             callback_url=callback_url,
             callback_headers=callback_headers,
             starting_page_number=starting_page_number,

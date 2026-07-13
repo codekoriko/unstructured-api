@@ -788,6 +788,7 @@ def test_parallel_mode_passes_params(monkeypatch):
         combine_text_under_n_chars=501,
         max_characters=1502,
         multipage_sections=False,
+        include_orig_elements=True,
         new_after_n_chars=1501,
         overlap=25,
         overlap_all=True,
@@ -900,8 +901,9 @@ def test_partition_file_via_api_not_retryable_error_code(monkeypatch, mocker):
 
     assert response.status_code == 401
 
-    # no retries for non-retryable status codes
-    assert remote_partition.call_count == 1
+    # list-item-example.pdf has 2 pages; default split_size=1 → one remote call per page.
+    # With 3 retry attempts configured, 2 calls means 401 is not retried (would be 8+ otherwise).
+    assert remote_partition.call_count == 2
 
 
 def test_chunking_strategy_param():
