@@ -6,7 +6,7 @@ import ipaddress
 import os
 import socket
 from typing import Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 import requests
 import urllib3
@@ -18,13 +18,13 @@ BLOCKED_HOSTNAMES = frozenset(
     }
 )
 
-DEFAULT_OUTBOUND_HOST_SUFFIXES = ".supabase.co"
 DEFAULT_MAX_BYTES = 500 * 1024 * 1024
 DEFAULT_FETCH_TIMEOUT_SECONDS = 300
 DEFAULT_OUTBOUND_TIMEOUT_SECONDS = 300
 
-OUTBOUND_ALLOWED_SUFFIXES_ENV = "OUTBOUND_URL_ALLOWED_HOST_SUFFIXES"
+# Env var: comma-separated exact hostnames/IPs allowed for outbound async URLs.
 OUTBOUND_ALLOWED_HOSTS_ENV = "OUTBOUND_URL_ALLOWED_HOSTS"
+# Env var: when truthy, allow http:// URLs (intended for local dev only).
 OUTBOUND_ALLOW_HTTP_ENV = "OUTBOUND_URL_ALLOW_HTTP"
 
 
@@ -38,11 +38,6 @@ def _truthy_env(name: str) -> bool:
 
 def _parse_csv_env(name: str) -> frozenset[str]:
     raw = os.environ.get(name, "")
-    return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
-
-
-def _parse_suffix_env(name: str, default: str) -> frozenset[str]:
-    raw = os.environ.get(name, default)
     return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
 
 
@@ -66,28 +61,10 @@ def _allowed_hosts() -> frozenset[str]:
     return _parse_csv_env(OUTBOUND_ALLOWED_HOSTS_ENV)
 
 
-def _allowed_suffixes() -> frozenset[str]:
-    suffixes = _parse_csv_env(OUTBOUND_ALLOWED_SUFFIXES_ENV)
-    if suffixes:
-        return suffixes
-    return _parse_suffix_env(OUTBOUND_ALLOWED_SUFFIXES_ENV, DEFAULT_OUTBOUND_HOST_SUFFIXES)
-
-
 def _strip_mime_parameters(content_type: str | None) -> str | None:
     if not content_type:
         return content_type
     return content_type.split(";", 1)[0].strip()
-
-
-def _hostname_matches_suffix(host: str, suffix: str) -> bool:
-    """True when host equals suffix or is a proper subdomain (dot-boundary match)."""
-    normalized_suffix = suffix.lower().lstrip(".")
-    if not normalized_suffix:
-        return False
-    normalized_host = host.lower().rstrip(".")
-    if normalized_host == normalized_suffix:
-        return True
-    return normalized_host.endswith(f".{normalized_suffix}")
 
 
 def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -101,18 +78,13 @@ def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def _hostname_is_allowed(
-    hostname: str,
-    *,
-    allowed_hosts: frozenset[str],
-    allowed_suffixes: frozenset[str],
-) -> bool:
+def _hostname_is_allowed(hostname: str, *, allowed_hosts: frozenset[str]) -> bool:
     host = hostname.lower().rstrip(".")
     if host in allowed_hosts:
         return True
     if host in BLOCKED_HOSTNAMES:
         return False
-    return any(_hostname_matches_suffix(host, suffix) for suffix in allowed_suffixes)
+    return False
 
 
 def _first_allowed_ip(hostname: str) -> str:
@@ -143,7 +115,6 @@ def _validate_outbound_url(
     *,
     url_label: str,
     allowed_hosts: frozenset[str],
-    allowed_suffixes: frozenset[str],
     resolve_dns: bool,
 ) -> str:
     cleaned = url.strip()
@@ -152,46 +123,39 @@ def _validate_outbound_url(
 
     parsed = urlparse(cleaned)
     scheme = (parsed.scheme or "").lower()
+    url_label_value_pair = f"{url_label} ({cleaned})"
     if scheme == "https":
         pass
     elif scheme == "http" and _http_allowed():
         pass
     else:
-        raise SourceUrlValidationError(f"{url_label} must use https")
+        raise SourceUrlValidationError(f"{url_label_value_pair}: must use https")
 
     hostname = parsed.hostname
     if not hostname:
-        raise SourceUrlValidationError(f"{url_label} is missing a host")
+        raise SourceUrlValidationError(f"{url_label_value_pair} is missing a host")
 
     if parsed.username or parsed.password:
-        raise SourceUrlValidationError(f"{url_label} must not contain embedded credentials")
+        raise SourceUrlValidationError(f"{url_label_value_pair} must not contain embedded credentials")
 
-    if not allowed_hosts and not allowed_suffixes:
+    if not allowed_hosts:
         raise SourceUrlValidationError(
-            f"{url_label} host is not allowed (no outbound allowlist configured)",
+            f"{url_label_value_pair} host is not allowed (no outbound allowlist configured)",
         )
 
     try:
         ip = ipaddress.ip_address(hostname)
     except ValueError:
-        if not _hostname_is_allowed(
-            hostname,
-            allowed_hosts=allowed_hosts,
-            allowed_suffixes=allowed_suffixes,
-        ):
-            raise SourceUrlValidationError(f"{url_label} host is not allowed")
+        if not _hostname_is_allowed(hostname, allowed_hosts=allowed_hosts):
+            raise SourceUrlValidationError(f"{url_label_value_pair} host is not allowed")
         if resolve_dns:
             _check_resolved_ips(hostname)
     else:
         explicitly_allowed = hostname.lower() in allowed_hosts
         if _ip_is_blocked(ip) and not explicitly_allowed:
-            raise SourceUrlValidationError(f"{url_label} host IP is not allowed")
-        if not _hostname_is_allowed(
-            hostname,
-            allowed_hosts=allowed_hosts,
-            allowed_suffixes=allowed_suffixes,
-        ):
-            raise SourceUrlValidationError(f"{url_label} host is not allowed")
+            raise SourceUrlValidationError(f"{url_label_value_pair} host IP is not allowed")
+        if not _hostname_is_allowed(hostname, allowed_hosts=allowed_hosts):
+            raise SourceUrlValidationError(f"{url_label_value_pair} host is not allowed")
 
     return cleaned
 
@@ -201,7 +165,6 @@ def _validate_role_url(url: str, *, url_label: str) -> str:
         url,
         url_label=url_label,
         allowed_hosts=_allowed_hosts(),
-        allowed_suffixes=_allowed_suffixes(),
         resolve_dns=True,
     )
 
@@ -237,14 +200,14 @@ def validate_source_filename(filename: str | None) -> str:
     return basename
 
 
-def _request_path_and_query(parsed) -> str:
+def _request_path_and_query(parsed: ParseResult) -> str:
     path = parsed.path or "/"
     if parsed.query:
         return f"{path}?{parsed.query}"
     return path
 
 
-def _pinned_pool(parsed, pinned_ip: str, timeout_seconds: int):
+def _pinned_pool(parsed: ParseResult, pinned_ip: str, timeout_seconds: int):
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     if parsed.scheme == "https":

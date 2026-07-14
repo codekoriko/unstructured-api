@@ -19,7 +19,7 @@ MAIN_API_ROUTE = "general/v0/general"
 
 @pytest.fixture(autouse=True)
 def allow_test_outbound_hosts(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "example.com")
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "example.com,project.supabase.co")
 
 
 def _fake_public_getaddrinfo(host, port, *_args, **_kwargs):
@@ -226,8 +226,7 @@ def test_partition_rejects_invalid_api_key_without_echoing_value():
 
 
 def test_async_partition_rejects_disallowed_destination_url(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOSTS", raising=False)
-    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOST_SUFFIXES", ".supabase.co")
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "project.supabase.co,example.com")
     client = TestClient(app)
     test_file = Path("sample-docs") / "fake-text.txt"
 
@@ -246,8 +245,7 @@ def test_async_partition_rejects_disallowed_destination_url(monkeypatch: pytest.
 
 
 def test_async_partition_rejects_disallowed_callback_url(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOST_SUFFIXES", ".supabase.co")
-    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "example.com")
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "project.supabase.co,example.com")
     client = TestClient(app)
     test_file = Path("sample-docs") / "fake-text.txt"
 
@@ -278,17 +276,20 @@ def test_async_partition_rejects_disallowed_callback_url(monkeypatch: pytest.Mon
 def test_validate_source_url_blocks_unsafe_targets(url: str, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("SOURCE_URL_ALLOW_HTTP", raising=False)
     monkeypatch.delenv("OUTBOUND_URL_ALLOW_HTTP", raising=False)
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "project.supabase.co")
     with pytest.raises(SourceUrlValidationError):
         validate_source_url(url)
 
 
-def test_validate_source_url_allows_supabase_host():
+def test_validate_source_url_allows_supabase_host(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "project.supabase.co")
     validate_source_url(
         "https://project.supabase.co/storage/v1/object/sign/bucket/doc.pdf?token=abc"
     )
 
 
-def test_validate_source_url_rejects_fake_supabase_suffix(monkeypatch: pytest.MonkeyPatch):
+def test_validate_source_url_rejects_unlisted_host(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "project.supabase.co")
     monkeypatch.setattr(
         "prepline_general.api.source_url.socket.getaddrinfo",
         lambda host, port: [
@@ -300,15 +301,14 @@ def test_validate_source_url_rejects_fake_supabase_suffix(monkeypatch: pytest.Mo
 
 
 def test_validate_destination_url_allows_supabase_host(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOSTS", raising=False)
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "project.supabase.co")
     validate_destination_url(
         "https://project.supabase.co/storage/v1/object/upload/sign/bucket/out.json?token=abc"
     )
 
 
 def test_validate_callback_url_rejects_unlisted_host(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOSTS", raising=False)
-    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOST_SUFFIXES", ".supabase.co")
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "project.supabase.co")
     with pytest.raises(SourceUrlValidationError, match="not allowed"):
         validate_callback_url("https://kestra.example.com/api/v1/main/executions/1/resume")
 

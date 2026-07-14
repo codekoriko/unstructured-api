@@ -7,7 +7,7 @@ This document explains the process for building, tagging, and pushing Docker ima
 The GitLab project and its container registry are **private**. CI runs on **merge requests and pushes to `main` only** (other branch pushes are skipped):
 
 | Stage | Job | What it does |
-|-------|-----|----------------|
+| ------- | ----- | ---------------- |
 | `lint` | `lint` | ruff format/check + CHANGELOG version sync |
 | `lint` | `shellcheck` | shell script lint |
 | `typecheck` | `typecheck` | mypy on `prepline_general/api` |
@@ -56,27 +56,24 @@ On deployment hosts, store credentials in `~/.docker/config.json` or your orches
 
 ## Async outbound URL environment variables
 
-These variables apply when callers use **async partition** (`destination_url` set). The API validates every outbound HTTPS URL (`source_url` GET, `destination_url` PUT, `callback_url` POST) against a **single shared allowlist**. Requests do not follow redirects; `source_url` downloads pin DNS at connect time.
+These variables apply when callers use **async partition** (`destination_url` set). The API validates every outbound HTTPS URL (`source_url` GET, `destination_url` PUT, `callback_url` POST) against a **single required host allowlist**. Requests do not follow redirects; `source_url` downloads pin DNS at connect time.
 
 ### Configuration
 
 | Variable | Default | When you need it |
-|----------|---------|------------------|
-| `OUTBOUND_URL_ALLOWED_HOST_SUFFIXES` | `.supabase.co` | **Production minimum.** Matches multi-tenant hosts (`*.supabase.co` per project). Add your Kestra domain suffix here too (e.g. `.your-kestra-domain.com`). |
-| `OUTBOUND_URL_ALLOWED_HOSTS` | *(empty)* | **Optional.** Exact hostnames or IPs that suffixes cannot express: local dev (`127.0.0.1`, `localhost`, `kong`), or a single Kestra host when you do not want to allow an entire domain suffix. |
+| ---------- | --------- | ------------------ |
+| `OUTBOUND_URL_ALLOWED_HOSTS` | *(empty)* | **Required for async outbound URLs.** Add the Supabase project URL and the Kestra instance URL here, along with any local dev hosts like `127.0.0.1`, `localhost`, or `kong`. |
 | `OUTBOUND_URL_ALLOW_HTTP` | off | Dev only |
 | `OUTBOUND_URL_TIMEOUT_SECONDS` | `300` | PUT/POST timeout |
 | `SOURCE_URL_MAX_BYTES` | 500 MiB | Download cap |
 | `SOURCE_URL_FETCH_TIMEOUT_SECONDS` | `300` | Download timeout |
 | `ALLOWED_STRATEGIES` | all four built-in strategies | Comma-separated allowlist per deployment pool (e.g. `fast` or `auto`). Unknown names fail with HTTP 503 at request time. |
 
-**Do you need both suffix and hosts?** Usually **suffixes only** in production:
+**Do you need the host allowlist?** Yes. Set `OUTBOUND_URL_ALLOWED_HOSTS` for every environment that uses async partition:
 
 ```yaml
-OUTBOUND_URL_ALLOWED_HOST_SUFFIXES: .supabase.co,.your-kestra-domain.com
+OUTBOUND_URL_ALLOWED_HOSTS: api.supabase.co,kong,localhost,127.0.0.1
 ```
-
-Use `OUTBOUND_URL_ALLOWED_HOSTS` only when exact matching is clearer or required (single Kestra hostname without widening to `.example.com`, or local Supabase/Kong on `localhost` / `127.0.0.1`).
 
 Deprecated per-role variables (`SOURCE_URL_*`, `DESTINATION_URL_*`, `CALLBACK_URL_*`) were removed; use `OUTBOUND_URL_*` only.
 
@@ -87,21 +84,8 @@ Split pools (fast vs auto) each run the same image with different env:
 ```yaml
 # Fast pool (nginx :8836)
 UNSTRUCTURED_API_KEY: ${API_KEY}
-ALLOWED_STRATEGIES: fast
-UNSTRUCTURED_MEMORY_FREE_MINIMUM_MB: 512
-OUTBOUND_URL_ALLOWED_HOSTS: <supabase-project-url>,<kestra-instance-url>,kong
-
-# Auto pool (nginx :8846)
-UNSTRUCTURED_API_KEY: ${API_KEY}
-ALLOWED_STRATEGIES: auto
-UNSTRUCTURED_MEMORY_FREE_MINIMUM_MB: 2048
 OUTBOUND_URL_ALLOWED_HOSTS: <supabase-project-url>,<kestra-instance-url>,kong
 ```
-
-Edge functions use two base URLs (no path suffix):
-
-- `UNSTRUCTURED_API_URL_FAST` → fast pool load balancer
-- `UNSTRUCTURED_API_URL_AUTO` → auto pool load balancer
 
 ## Local testing
 
@@ -119,9 +103,13 @@ curl -X POST http://localhost:8000/general/v0/general -F 'files=@/mnt/d/.wor/inp
 make run-web-app
 ```
 
-Local Supabase/Kong:
+1. Relay with `ngrok`
 
-1. check if infisical > `Contradic Backend-Infra` > environement `debug` has the correct [ngrok domain](https://dashboard.ngrok.com/domains) under `UNSTRUCTURED_API_URL_FAST` and `UNSTRUCTURED_API_URL_AUTO` (base URL only, e.g. `https://contradic-ngrok-user:GPxxxxxxxxxxxxxxxuaz@dimmed-nauseously-laverna.ngrok-free.dev`)
+```sh
+ngrok http 8000 --basic-auth="contradic-ngrok-user:GPSr9hSTxNLKgWi1Euaz"
+```
+
+1. check if infisical > `Contradic Backend-Infra` > environement `debug` has the correct [ngrok domain](https://dashboard.ngrok.com/domains) under `UNSTRUCTURED_API_URL`. ie `https://contradic-ngrok-user:GPxxxxxxxxxxxxxxxuaz@dimmed-nauseously-laverna.ngrok-free.dev/general/v0/general`
 
 1. update edge functions secrets with `debug`
 

@@ -21,6 +21,13 @@ SUPABASE_SIGNED_UPLOAD = (
     "https://project.supabase.co/storage/v1/object/upload/sign/bucket/out.json?token=abc"
 )
 
+DEFAULT_ALLOWED_HOSTS = "project.supabase.co,storage.internal"
+
+
+@pytest.fixture(autouse=True)
+def outbound_allowed_hosts(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", DEFAULT_ALLOWED_HOSTS)
+
 
 def _fake_public_getaddrinfo(host, port, *_args, **_kwargs):
     return [
@@ -37,24 +44,22 @@ def public_dns(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.parametrize(
-    ("host", "suffix", "expected"),
+    ("host", "allowed_hosts", "expected"),
     [
-        ("project.supabase.co", ".supabase.co", True),
-        ("supabase.co", "supabase.co", True),
-        ("attacker-supabase.co", ".supabase.co", False),
-        ("notsupabase.co", ".supabase.co", False),
-        ("evil.supabase.co.attacker.com", ".supabase.co", False),
+        ("project.supabase.co", "project.supabase.co", True),
+        ("storage.internal", "storage.internal", True),
+        ("attacker-supabase.co", "project.supabase.co", False),
+        ("evil.storage.internal", "storage.internal", False),
     ],
 )
-def test_hostname_suffix_boundary_via_validation(
+def test_hostname_allowlist_via_validation(
     host: str,
-    suffix: str,
+    allowed_hosts: str,
     expected: bool,
     monkeypatch: pytest.MonkeyPatch,
     public_dns: None,
 ):
-    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOST_SUFFIXES", suffix)
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOSTS", raising=False)
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", allowed_hosts)
     url = f"https://{host}/file.pdf"
     if expected:
         assert validate_source_url(url) == url
@@ -63,9 +68,7 @@ def test_hostname_suffix_boundary_via_validation(
             validate_source_url(url)
 
 
-def test_validate_source_url_allows_exact_host(monkeypatch: pytest.MonkeyPatch, public_dns: None):
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOST_SUFFIXES", raising=False)
-    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "storage.internal")
+def test_validate_source_url_allows_exact_host(public_dns: None):
     url = "https://storage.internal/signed/doc.pdf"
     assert validate_source_url(url) == url
 
@@ -81,21 +84,20 @@ def test_validate_source_url_rejects_dns_to_private_ip(monkeypatch: pytest.Monke
         validate_source_url(SUPABASE_SIGNED_DOWNLOAD)
 
 
-def test_validate_destination_url_rejects_fake_supabase_suffix(
+def test_validate_destination_url_rejects_unlisted_host(
     monkeypatch: pytest.MonkeyPatch,
     public_dns: None,
 ):
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOSTS", raising=False)
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "project.supabase.co")
     with pytest.raises(SourceUrlValidationError, match="not allowed"):
         validate_destination_url("https://attacker-supabase.co/upload")
 
 
-def test_validate_callback_url_allows_configured_suffix(
+def test_validate_callback_url_allows_configured_host(
     monkeypatch: pytest.MonkeyPatch,
     public_dns: None,
 ):
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOSTS", raising=False)
-    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOST_SUFFIXES", ".kestra.example.com")
+    monkeypatch.setenv("OUTBOUND_URL_ALLOWED_HOSTS", "kestra.example.com")
     url = "https://kestra.example.com/api/v1/main/executions/1/resume"
     assert validate_callback_url(url) == url
 
@@ -210,9 +212,5 @@ def test_validate_source_filename_rejects_empty():
         validate_source_filename("   ")
 
 
-def test_validate_destination_url_accepts_supabase_signed_upload(
-    monkeypatch: pytest.MonkeyPatch,
-    public_dns: None,
-):
-    monkeypatch.delenv("OUTBOUND_URL_ALLOWED_HOSTS", raising=False)
+def test_validate_destination_url_accepts_supabase_signed_upload(public_dns: None):
     assert validate_destination_url(SUPABASE_SIGNED_UPLOAD) == SUPABASE_SIGNED_UPLOAD
