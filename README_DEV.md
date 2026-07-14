@@ -84,8 +84,21 @@ Split pools (fast vs auto) each run the same image with different env:
 ```yaml
 # Fast pool (nginx :8836)
 UNSTRUCTURED_API_KEY: ${API_KEY}
+ALLOWED_STRATEGIES: fast
+UNSTRUCTURED_MEMORY_FREE_MINIMUM_MB: 512
+OUTBOUND_URL_ALLOWED_HOSTS: <supabase-project-url>,<kestra-instance-url>,kong
+
+# Auto pool (nginx :8846)
+UNSTRUCTURED_API_KEY: ${API_KEY}
+ALLOWED_STRATEGIES: auto
+UNSTRUCTURED_MEMORY_FREE_MINIMUM_MB: 2048
 OUTBOUND_URL_ALLOWED_HOSTS: <supabase-project-url>,<kestra-instance-url>,kong
 ```
+
+Edge functions use two base URLs (no path suffix):
+
+- `UNSTRUCTURED_API_URL_FAST` → fast pool load balancer
+- `UNSTRUCTURED_API_URL_AUTO` → auto pool load balancer
 
 ## Local testing
 
@@ -109,7 +122,7 @@ make run-web-app
 ngrok http 8000 --basic-auth="contradic-ngrok-user:GPSr9hSTxNLKgWi1Euaz"
 ```
 
-1. check if infisical > `Contradic Backend-Infra` > environement `debug` has the correct [ngrok domain](https://dashboard.ngrok.com/domains) under `UNSTRUCTURED_API_URL`. ie `https://contradic-ngrok-user:GPxxxxxxxxxxxxxxxuaz@dimmed-nauseously-laverna.ngrok-free.dev/general/v0/general`
+1. check if infisical > `Contradic Backend-Infra` > environement `debug` has the correct [ngrok domain](https://dashboard.ngrok.com/domains) under `UNSTRUCTURED_API_URL_FAST` and `UNSTRUCTURED_API_URL_AUTO` (base URL only, e.g. `https://contradic-ngrok-user:GPxxxxxxxxxxxxxxxuaz@dimmed-nauseously-laverna.ngrok-free.dev`)
 
 1. update edge functions secrets with `debug`
 
