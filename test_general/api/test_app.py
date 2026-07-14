@@ -229,6 +229,74 @@ def test_strategy_param_400():
     assert response.status_code == 422
 
 
+def test_allowed_strategies_fast_only(monkeypatch):
+    """When ALLOWED_STRATEGIES=fast, auto and other strategies are rejected."""
+    monkeypatch.setenv("ALLOWED_STRATEGIES", "fast")
+    client = TestClient(app)
+    test_file = Path("sample-docs") / "layout-parser-paper-fast.pdf"
+
+    response = client.post(
+        MAIN_API_ROUTE,
+        files=[("files", (str(test_file), open(test_file, "rb")))],
+        data={"strategy": "fast"},
+    )
+    assert response.status_code == 200
+
+    response = client.post(
+        MAIN_API_ROUTE,
+        files=[("files", (str(test_file), open(test_file, "rb")))],
+        data={"strategy": "auto"},
+    )
+    assert response.status_code == 400
+    assert "Must be one of" in response.json()["detail"]
+    assert "fast" in response.json()["detail"]
+
+
+def test_allowed_strategies_auto_only(monkeypatch):
+    """When ALLOWED_STRATEGIES=auto, fast and other strategies are rejected."""
+    monkeypatch.setenv("ALLOWED_STRATEGIES", "auto")
+    client = TestClient(app)
+    test_file = Path("sample-docs") / "layout-parser-paper-fast.pdf"
+
+    response = client.post(
+        MAIN_API_ROUTE,
+        files=[("files", (str(test_file), open(test_file, "rb")))],
+        data={"strategy": "fast"},
+    )
+    assert response.status_code == 400
+    assert "Must be one of" in response.json()["detail"]
+    assert "auto" in response.json()["detail"]
+
+
+def test_validate_strategy_respects_allowed_strategies_env(monkeypatch):
+    monkeypatch.setenv("ALLOWED_STRATEGIES", "fast,auto")
+    assert general._validate_strategy("fast") == "fast"
+    assert general._validate_strategy("auto") == "auto"
+
+
+def test_validate_strategy_rejects_disallowed_strategy(monkeypatch):
+    monkeypatch.setenv("ALLOWED_STRATEGIES", "fast")
+    with pytest.raises(HTTPException) as exc_info:
+        general._validate_strategy("auto")
+    assert exc_info.value.status_code == 400
+    assert "auto" in exc_info.value.detail
+
+
+def test_parse_allowed_strategies_env_rejects_unknown_entries(monkeypatch):
+    monkeypatch.setenv("ALLOWED_STRATEGIES", "fast,autoo")
+    with pytest.raises(HTTPException) as exc_info:
+        general._parse_allowed_strategies_env()
+    assert exc_info.value.status_code == 503
+    assert "autoo" in exc_info.value.detail
+
+
+def test_parse_allowed_strategies_env_rejects_empty_allowlist(monkeypatch):
+    monkeypatch.setenv("ALLOWED_STRATEGIES", " , ")
+    with pytest.raises(HTTPException) as exc_info:
+        general._parse_allowed_strategies_env()
+    assert exc_info.value.status_code == 503
+
+
 def test_valid_encoding_param():
     """
     Verify that we get a 200 for passing an encoding param

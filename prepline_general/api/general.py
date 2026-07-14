@@ -530,12 +530,46 @@ def _check_pdf(file: IO[bytes]):
         )
 
 
+ALLOWED_STRATEGIES_ENV = "ALLOWED_STRATEGIES"
+DEFAULT_STRATEGIES = frozenset({"fast", "hi_res", "auto", "ocr_only"})
+
+
+def _parse_allowed_strategies_env() -> frozenset[str]:
+    raw = os.environ.get(ALLOWED_STRATEGIES_ENV, "")
+    if not raw.strip():
+        return DEFAULT_STRATEGIES
+
+    configured = frozenset(
+        part.strip().lower() for part in raw.split(",") if part.strip()
+    )
+    unknown = configured - DEFAULT_STRATEGIES
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"Invalid ALLOWED_STRATEGIES entries: {sorted(unknown)}. "
+                f"Must be a subset of {sorted(DEFAULT_STRATEGIES)}"
+            ),
+        )
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ALLOWED_STRATEGIES must include at least one valid strategy name",
+        )
+    return configured
+
+
+def _allowed_strategies() -> frozenset[str]:
+    return _parse_allowed_strategies_env()
+
+
 def _validate_strategy(strategy: str) -> str:
     strategy = strategy.lower()
-    strategies = ["fast", "hi_res", "auto", "ocr_only"]
-    if strategy not in strategies:
+    allowed = _allowed_strategies()
+    if strategy not in allowed:
         raise HTTPException(
-            status_code=400, detail=f"Invalid strategy: {strategy}. Must be one of {strategies}"
+            status_code=400,
+            detail=f"Invalid strategy: {strategy}. Must be one of {sorted(allowed)}",
         )
     return strategy
 
