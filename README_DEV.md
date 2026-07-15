@@ -134,19 +134,20 @@ npm run edge:secret:update-env:debug
 
 To push a new version of the API manually to Docker Hub, follow these steps:
 
-**prerequisite:** Launch Docker 🐋
+### 1. Launch Docker 🐋 & Set the Version Environment Variable
 
-### 1. Set the Version Environment Variable
+Set the `DOCKER_IMAGE` variable to the version you want to build and push.
 
-Set the `DOCKER_IMAGE` variable to the version you want to build and push. **Note: Each time you perform a push, ensure you increment the version suffix.**
+#### unstructured-api version number
 
-For example:
+check file: `prepline_general/api/__version__.py`
 
-- previous push: `zeuxippus/unstructured-api:0.1.2-contradic.3`
-- This push should be: `zeuxippus/unstructured-api:0.1.2-contradic.4`
+#### contradic version number
+
+check: [zeuxippus/unstructured-api](https://hub.docker.com/repository/docker/zeuxippus/unstructured-api/general) then increment the version suffix.
 
 ```bash
-export DOCKER_IMAGE="zeuxippus/unstructured-api:0.1.2-contradic.4"
+export DOCKER_IMAGE="zeuxippus/unstructured-api:0.1.8-contradic.4"
 ```
 
 ### 2. Build the image
@@ -158,8 +159,6 @@ You can use the provided build script.
 ```
 
 *(Note: The script defaults to building `pipeline-family-general-dev` if `DOCKER_IMAGE` is not set.)*
-
-
 
 ### 3. Tag the Image
 
