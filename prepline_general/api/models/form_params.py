@@ -42,7 +42,6 @@ class GeneralFormParams(BaseModel):
     new_after_n_chars: Optional[int]
     overlap: int
     overlap_all: bool
-    include_orig_elements: bool
     starting_page_number: Optional[int] = None
     include_slide_notes: bool
 
@@ -217,14 +216,6 @@ class GeneralFormParams(BaseModel):
             ),
             BeforeValidator(SmartValueParser[bool]().value_or_first_element),
         ] = True,
-        include_orig_elements: Annotated[
-            bool,
-            Form(
-                title="Include Orig Elements",
-                description="If chunking strategy is set, determines if original elements are included in the metadata. Default: true",
-            ),
-            BeforeValidator(SmartValueParser[bool]().value_or_first_element),
-        ] = True,
         new_after_n_chars: Annotated[
             Optional[int],
             Form(
@@ -356,7 +347,6 @@ into every chunk and can balloon the response size dramatically.""",
             new_after_n_chars=new_after_n_chars,
             overlap=overlap,
             overlap_all=overlap_all,
-            include_orig_elements=include_orig_elements,
             unique_element_ids=unique_element_ids,
             destination_url=destination_url,
             source_url=source_url,

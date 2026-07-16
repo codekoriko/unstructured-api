@@ -857,7 +857,6 @@ def test_parallel_mode_passes_params(monkeypatch):
         combine_text_under_n_chars=501,
         max_characters=1502,
         multipage_sections=False,
-        include_orig_elements=True,
         new_after_n_chars=1501,
         overlap=25,
         overlap_all=True,
